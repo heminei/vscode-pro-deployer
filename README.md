@@ -1,16 +1,16 @@
 # pro-deployer
 
-PRO Deployer - Simple and powerful SFTP/FTP deployer. Support concurrency upload or delete files (**very fast upload**).
+PRO Deployer - Simple and powerful SFTP/FTP deployer. Support concurrency uploading or delete files (**very fast uploading and deleting files or folders**).
 
 ## Features
 
 -   multiple targets
 -   switchable profiles
 -   upload on save
--   auto delete
+-   auto-delete files or folders
 -   concurrency upload and delete files
 -   ignore list
--   add `Upload` and `Upload to` buttons to context menu
+-   add `Upload` and `Upload to` buttons to a context menu
 
 ## Usage
 

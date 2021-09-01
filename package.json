@@ -1,8 +1,8 @@
 {
     "name": "pro-deployer",
-    "displayName": "PRO Deployer",
+    "displayName": "PRO Deployer - SFTP/FTP deployer",
     "description": "PRO Deployer - Simple and powerful SFTP/FTP deployer",
-    "version": "0.9.2",
+    "version": "0.9.3",
     "publisher": "heminei",
     "categories": [
         "Other"
@@ -20,6 +20,7 @@
         "remote",
         "multiple"
     ],
+    "icon": "icon.png",
     "engines": {
         "vscode": "^1.53.0"
     },
