@@ -5,7 +5,7 @@ import fs = require("fs");
 import micromatch = require("micromatch");
 
 export class Extension {
-    public static mode = "dev";
+    public static mode = "prod";
     public static extensionContext: vscode.ExtensionContext;
     public static outputChannel: vscode.OutputChannel | null;
 
