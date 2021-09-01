@@ -44,7 +44,7 @@ export interface QueueTask extends Queue.Task<vscode.Uri> {
     action: string;
 }
 
-export interface ReadDirPath {
-    type: string;
-    uri: vscode.Uri;
-}
+// export interface ReadDirPath {
+//     type: string;
+//     uri: vscode.Uri;
+// }

@@ -25,9 +25,6 @@ export class Extension {
     }
 
     public static appendLineToOutputChannel(string: string) {
-        if (this.mode !== "dev") {
-            return;
-        }
         const date = new Date();
         if (Extension.outputChannel) {
             Extension.outputChannel.appendLine("[" + date.toISOString() + "]" + string);

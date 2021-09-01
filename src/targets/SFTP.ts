@@ -1,5 +1,5 @@
 import { Extension } from "../extension";
-import { QueueTask, ReadDirPath, TargetInterface, TargetOptionsInterface } from "./Interfaces";
+import { QueueTask, TargetInterface, TargetOptionsInterface } from "./Interfaces";
 import * as path from "path";
 import * as vscode from "vscode";
 import ssh2 = require("ssh2");
@@ -51,6 +51,7 @@ export class SFTP extends EventEmitter implements TargetInterface {
 
         this.once("ready", () => {
             cb();
+            Extension.appendLineToOutputChannel("[INFO][SFTP] Connected successfully to: " + this.options.host);
         });
         this.once("error", (error) => {
             errorCb(error);
@@ -59,6 +60,7 @@ export class SFTP extends EventEmitter implements TargetInterface {
         if (this.isConnecting === true) {
             return;
         }
+        this.isConnecting = true;
 
         this.client.once("ready", () => {
             this.client.sftp((err: any, sftpClient: ssh2.SFTPWrapper) => {
@@ -68,7 +70,6 @@ export class SFTP extends EventEmitter implements TargetInterface {
                     this.isConnected = true;
                     this.isConnecting = false;
                     this.emit("ready", this);
-                    Extension.appendLineToOutputChannel("[INFO][SFTP] Connected successfully to: " + this.options.host);
                 } else {
                     Extension.appendLineToOutputChannel("[ERROR][SFTP] Can't convert ssh2 to sftp");
                 }
@@ -80,8 +81,6 @@ export class SFTP extends EventEmitter implements TargetInterface {
             this.emit("error", error);
             errorCb(error);
         });
-
-        this.isConnecting = true;
 
         if (!this.options.port) {
             this.options.port = 22;
@@ -191,9 +190,6 @@ export class SFTP extends EventEmitter implements TargetInterface {
                                             );
                                         },
                                         (reason: Error) => {
-                                            Extension.appendLineToOutputChannel(
-                                                "[INFO][SFTP] Can't create directory: " + dir + "."
-                                            );
                                             cb(reason);
                                             reject(reason);
                                         }
@@ -208,7 +204,6 @@ export class SFTP extends EventEmitter implements TargetInterface {
                                 reject(err.message);
                                 return;
                             }
-
                             Extension.appendLineToOutputChannel(
                                 "[INFO][SFTP] File: '" +
                                     relativePath +
