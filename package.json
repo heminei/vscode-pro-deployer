@@ -2,7 +2,7 @@
     "name": "pro-deployer",
     "displayName": "PRO Deployer - SFTP/FTP deployer",
     "description": "PRO Deployer - Simple and powerful SFTP/FTP deployer",
-    "version": "0.9.5",
+    "version": "0.9.6",
     "publisher": "heminei",
     "categories": [
         "Other"

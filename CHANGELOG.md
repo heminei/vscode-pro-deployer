@@ -4,6 +4,10 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.9.6]
+
+-   fixed bugs when run upload command and in project missing .gitignore file
+
 ## [0.9.5]
 
 -   fixed bugs in FTP target

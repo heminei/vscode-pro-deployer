@@ -144,8 +144,6 @@ export function activate(context: vscode.ExtensionContext) {
     );
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.upload", (uri: vscode.Uri, thisArg: vscode.Uri[]) => {
-            let file = fs.readFileSync(Extension.getActiveWorkspaceFolderPath() + "/.gitignore");
-
             if (!thisArg) {
                 if (!uri && vscode.window.activeTextEditor?.document.uri) {
                     uri = vscode.window.activeTextEditor?.document.uri;
@@ -174,7 +172,6 @@ export function activate(context: vscode.ExtensionContext) {
     );
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.upload-all-open", (uri: vscode.Uri, thisArg: vscode.Uri[]) => {
-            console.log("vscode.workspace.textDocuments", vscode.workspace.textDocuments);
             const files = vscode.workspace.textDocuments.filter((textDocument) => {
                 if (textDocument.uri.scheme === "git") {
                     return false;
