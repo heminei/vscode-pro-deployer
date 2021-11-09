@@ -10,7 +10,7 @@ export class Configs {
         autoDelete: true,
         activeTargets: ["My FTP"],
         concurrency: 5,
-        ignore: [".git/**/*", ".vscode/**/*", "**/*.git"],
+        ignore: [".git/**/*", ".vscode/**/*"],
         targets: [
             {
                 name: "My FTP",
@@ -29,6 +29,8 @@ export class Configs {
                 user: "admin",
                 password: "123456",
                 dir: "/",
+                privateKey: null,
+                passphrase: null,
             },
         ],
     };

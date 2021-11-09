@@ -35,6 +35,48 @@ export class Extension {
         vscode.window.showErrorMessage("[PRO Deployer] " + string);
         Extension.appendLineToOutputChannel("[ERROR] " + string);
     }
+
+    public static isLikeFile(uri: vscode.Uri): Promise<boolean> {
+        return new Promise<boolean>((resolve, reject) => {
+            vscode.workspace.fs.stat(uri).then(
+                (fileStat) => {
+                    if (fileStat.type === vscode.FileType.File) {
+                        resolve(true);
+                    } else {
+                        resolve(false);
+                    }
+                },
+                (reason) => {
+                    let name = uri.toString().split("/").pop();
+                    if (!name) {
+                        reject("Can't get file or folder name");
+                        return;
+                    }
+                    if (name.split(".").length > 1) {
+                        resolve(true);
+                    } else {
+                        resolve(false);
+                    }
+                }
+            );
+        });
+    }
+
+    public static isUriIgnored(uri: vscode.Uri): boolean {
+        if (uri.scheme === "git") {
+            Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
+            return true;
+        }
+        if (uri.path === Configs.getConfigFile().path) {
+            Extension.appendLineToOutputChannel("SKIP config file");
+            return true;
+        }
+        if (micromatch.isMatch(vscode.workspace.asRelativePath(uri.path), Configs.getConfigs().ignore)) {
+            Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
+            return true;
+        }
+        return false;
+    }
 }
 
 // this method is called when your extension is activated
@@ -59,6 +101,7 @@ export function activate(context: vscode.ExtensionContext) {
     // console.log("onDidChangeWorkspaceFolders", vscode.workspace.workspaceFolders, e);
     // });
     // vscode.workspace.onWillDeleteFiles((e) => {
+    //     console.log("onWillDeleteFiles", e);
     //     if (Configs.getConfigs().autoDelete === false) {
     //         return;
     //     }
@@ -96,25 +139,25 @@ export function activate(context: vscode.ExtensionContext) {
     //     }
     //     Targets.upload(uri);
     // });
-    vscode.workspace.onDidRenameFiles((e) => {
-        console.log("onDidRenameFiles", e);
-        e.files.forEach((item) => {
-            let uri = item.oldUri;
-            Extension.appendLineToOutputChannel("File renamed: " + uri.path);
-            vscode.workspace.fs.stat(item.newUri).then((fileStat) => {
-                if (fileStat.type === vscode.FileType.File) {
-                    Targets.delete(uri);
-                } else {
-                    Targets.deleteDir(uri);
-                }
-            });
-        });
-        
-    });
+    // vscode.workspace.onDidRenameFiles((e) => {
+    //     console.log("onDidRenameFiles", e);
+    //     e.files.forEach((item) => {
+    //         let uri = item.oldUri;
+    //         Extension.appendLineToOutputChannel("File renamed: " + uri.path);
+    //         vscode.workspace.fs.stat(item.newUri).then((fileStat) => {
+    //             if (fileStat.type === vscode.FileType.File) {
+    //                 Targets.delete(uri);
+    //             } else {
+    //                 Targets.deleteDir(uri);
+    //             }
+    //         });
+    //     });
+    // });
 
     const fileWatcher = vscode.workspace.createFileSystemWatcher("**/*");
 
     fileWatcher.onDidCreate((uri) => {
+        // console.log("onDidCreate", uri);
         if (Configs.getConfigs().uploadOnSave === false) {
             return;
         }
@@ -122,51 +165,57 @@ export function activate(context: vscode.ExtensionContext) {
             Extension.appendLineToOutputChannel("SKIP config file");
             return;
         }
-        if (micromatch.isMatch(vscode.workspace.asRelativePath(uri.path), Configs.getConfigs().ignore)) {
+        if (Extension.isUriIgnored(uri)) {
             Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
             return;
         }
-        Targets.upload(uri);
+
+        Extension.isLikeFile(uri).then((isFile) => {
+            if (isFile) {
+                Targets.upload(uri);
+            } else {
+                vscode.workspace.findFiles(vscode.workspace.asRelativePath(uri) + "/**/*").then((files) => {
+                    files.forEach((uri) => {
+                        Targets.upload(uri);
+                    });
+                });
+            }
+        });
     });
     fileWatcher.onDidChange((uri) => {
+        // console.log("onDidChange", uri);
         if (Configs.getConfigs().uploadOnSave === false) {
             return;
         }
-        if (uri.path === Configs.getConfigFile().path) {
-            Extension.appendLineToOutputChannel("SKIP config file");
-            return;
-        }
-        if (micromatch.isMatch(vscode.workspace.asRelativePath(uri.path), Configs.getConfigs().ignore)) {
-            Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
+        if (Extension.isUriIgnored(uri)) {
             return;
         }
         Targets.upload(uri);
     });
     fileWatcher.onDidDelete((uri) => {
-        console.log("onDidDelete", uri);
+        // console.log("onDidDelete", uri);
         if (Configs.getConfigs().autoDelete === false) {
             return;
         }
-
-        if (uri.path === Configs.getConfigFile().path) {
-            Extension.appendLineToOutputChannel("SKIP config file");
-            return;
-        }
-        if (micromatch.isMatch(vscode.workspace.asRelativePath(uri.path), Configs.getConfigs().ignore)) {
-            Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
+        if (Extension.isUriIgnored(uri)) {
             return;
         }
 
-        vscode.workspace.fs.stat(uri).then((fileStat) => {
-            if (fileStat.type === vscode.FileType.File) {
-                Targets.delete(uri);
-            } else {
-                Targets.deleteDir(uri);
+        Extension.isLikeFile(uri).then(
+            (isFile) => {
+                if (isFile) {
+                    Targets.delete(uri);
+                } else {
+                    Targets.deleteDir(uri);
+                }
+            },
+            (reason) => {
+                Extension.appendLineToOutputChannel("[ERROR] " + reason);
             }
-        });
+        );
     });
 
-    // The commandId parameter must match the command field in package.json
+    context.subscriptions.push(fileWatcher);
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.generate-config-file", () => {
             Configs.generateConfigFile();
@@ -181,7 +230,7 @@ export function activate(context: vscode.ExtensionContext) {
                 thisArg = [uri];
             }
             if (!thisArg) {
-                Extension.showErrorMessage("Can't files for uploading");
+                Extension.showErrorMessage("Can't find files for uploading");
                 return;
             }
 
@@ -196,8 +245,8 @@ export function activate(context: vscode.ExtensionContext) {
                 const target = Targets.findByName(value);
 
                 thisArg.forEach((uri) => {
-                    vscode.workspace.fs.stat(uri).then((fileStat) => {
-                        if (fileStat.type === vscode.FileType.File) {
+                    Extension.isLikeFile(uri).then((isFile) => {
+                        if (isFile) {
                             target.upload(uri);
                         } else {
                             vscode.workspace.findFiles(vscode.workspace.asRelativePath(uri) + "/**/*").then((files) => {
@@ -225,8 +274,8 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             thisArg.forEach((uri) => {
-                vscode.workspace.fs.stat(uri).then((fileStat) => {
-                    if (fileStat.type === vscode.FileType.File) {
+                Extension.isLikeFile(uri).then((isFile) => {
+                    if (isFile) {
                         Targets.upload(uri);
                     } else {
                         vscode.workspace.findFiles(vscode.workspace.asRelativePath(uri) + "/**/*").then((files) => {

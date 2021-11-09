@@ -236,9 +236,7 @@ export class FTP extends EventEmitter implements TargetInterface {
                                 reject(err);
                                 return;
                             }
-                            Extension.appendLineToOutputChannel(
-                                "[INFO][SFTP] File deleted: '" + this.options.dir + relativePath
-                            );
+                            Extension.appendLineToOutputChannel("[INFO][SFTP] File deleted: '" + relativePath);
                             cb();
                             resolve(uri);
                         });

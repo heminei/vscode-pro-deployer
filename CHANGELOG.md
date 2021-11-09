@@ -4,6 +4,12 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [1.0.1]
+
+-   fixed bugs
+-   implement file watcher
+-   added new command: `pro-deployer.upload-all-open`
+
 ## [0.9.6]
 
 -   fixed bugs when run upload command and in project missing .gitignore file

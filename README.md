@@ -12,6 +12,7 @@ PRO Deployer - Simple and powerful SFTP/FTP deployer. Support concurrency upload
 -   ignore list
 -   add `Upload` and `Upload to` buttons to a context menu
 -   support SSH keys
+-   support auto upload and remove files changed on disk, e.g triggered by another application
 
 ## Usage
 
@@ -65,3 +66,4 @@ This extension contributes the following commands:
 -   `pro-deployer.generate-config-file`: auto generate config file
 -   `pro-deployer.upload`: upload file or folder
 -   `pro-deployer.upload-to`: upload file or folder to selected target
+-   `pro-deployer.upload-all-open`: upload all open files
