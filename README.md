@@ -11,6 +11,7 @@ PRO Deployer - Simple and powerful SFTP/FTP deployer. Support concurrency upload
 -   concurrency upload and delete files
 -   ignore list
 -   add `Upload` and `Upload to` buttons to a context menu
+-   support SSH keys
 
 ## Usage
 
@@ -48,7 +49,9 @@ PRO Deployer - Simple and powerful SFTP/FTP deployer. Support concurrency upload
             "port": 22,
             "user": "admin",
             "password": "123456",
-            "dir": "/public_html"
+            "dir": "/public_html",
+            "privateKey": null,
+            "passphrase": null
         }
     ]
 }

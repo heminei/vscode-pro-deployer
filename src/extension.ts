@@ -5,7 +5,7 @@ import fs = require("fs");
 import micromatch = require("micromatch");
 
 export class Extension {
-    public static mode = "prod";
+    public static mode = "dev";
     public static extensionContext: vscode.ExtensionContext;
     public static outputChannel: vscode.OutputChannel | null;
 
@@ -55,24 +55,53 @@ export function activate(context: vscode.ExtensionContext) {
         });
     });
 
-    vscode.workspace.onDidChangeWorkspaceFolders((e) => {
-        // console.log("onDidChangeWorkspaceFolders", vscode.workspace.workspaceFolders, e);
-    });
-    vscode.workspace.onWillDeleteFiles((e) => {
-        if (Configs.getConfigs().autoDelete === false) {
-            return;
-        }
-        e.files.forEach((uri) => {
-            if (uri.path === Configs.getConfigFile().path) {
-                Extension.appendLineToOutputChannel("SKIP config file");
-                return;
-            }
-            if (micromatch.isMatch(vscode.workspace.asRelativePath(uri.path), Configs.getConfigs().ignore)) {
-                Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
-                return;
-            }
+    // vscode.workspace.onDidChangeWorkspaceFolders((e) => {
+    // console.log("onDidChangeWorkspaceFolders", vscode.workspace.workspaceFolders, e);
+    // });
+    // vscode.workspace.onWillDeleteFiles((e) => {
+    //     if (Configs.getConfigs().autoDelete === false) {
+    //         return;
+    //     }
+    //     e.files.forEach((uri) => {
+    //         if (uri.path === Configs.getConfigFile().path) {
+    //             Extension.appendLineToOutputChannel("SKIP config file");
+    //             return;
+    //         }
+    //         if (micromatch.isMatch(vscode.workspace.asRelativePath(uri.path), Configs.getConfigs().ignore)) {
+    //             Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
+    //             return;
+    //         }
 
-            vscode.workspace.fs.stat(uri).then((fileStat) => {
+    //         vscode.workspace.fs.stat(uri).then((fileStat) => {
+    //             if (fileStat.type === vscode.FileType.File) {
+    //                 Targets.delete(uri);
+    //             } else {
+    //                 Targets.deleteDir(uri);
+    //             }
+    //         });
+    //     });
+    // });
+    // vscode.workspace.onDidSaveTextDocument((e) => {
+    //     if (Configs.getConfigs().uploadOnSave === false) {
+    //         return;
+    //     }
+    //     let uri = e.uri;
+    //     if (uri.path === Configs.getConfigFile().path) {
+    //         Extension.appendLineToOutputChannel("SKIP config file");
+    //         return;
+    //     }
+    //     if (micromatch.isMatch(vscode.workspace.asRelativePath(uri.path), Configs.getConfigs().ignore)) {
+    //         Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
+    //         return;
+    //     }
+    //     Targets.upload(uri);
+    // });
+    vscode.workspace.onDidRenameFiles((e) => {
+        console.log("onDidRenameFiles", e);
+        e.files.forEach((item) => {
+            let uri = item.oldUri;
+            Extension.appendLineToOutputChannel("File renamed: " + uri.path);
+            vscode.workspace.fs.stat(item.newUri).then((fileStat) => {
                 if (fileStat.type === vscode.FileType.File) {
                     Targets.delete(uri);
                 } else {
@@ -80,12 +109,15 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             });
         });
+        
     });
-    vscode.workspace.onDidSaveTextDocument((e) => {
+
+    const fileWatcher = vscode.workspace.createFileSystemWatcher("**/*");
+
+    fileWatcher.onDidCreate((uri) => {
         if (Configs.getConfigs().uploadOnSave === false) {
             return;
         }
-        let uri = e.uri;
         if (uri.path === Configs.getConfigFile().path) {
             Extension.appendLineToOutputChannel("SKIP config file");
             return;
@@ -95,6 +127,43 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
         Targets.upload(uri);
+    });
+    fileWatcher.onDidChange((uri) => {
+        if (Configs.getConfigs().uploadOnSave === false) {
+            return;
+        }
+        if (uri.path === Configs.getConfigFile().path) {
+            Extension.appendLineToOutputChannel("SKIP config file");
+            return;
+        }
+        if (micromatch.isMatch(vscode.workspace.asRelativePath(uri.path), Configs.getConfigs().ignore)) {
+            Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
+            return;
+        }
+        Targets.upload(uri);
+    });
+    fileWatcher.onDidDelete((uri) => {
+        console.log("onDidDelete", uri);
+        if (Configs.getConfigs().autoDelete === false) {
+            return;
+        }
+
+        if (uri.path === Configs.getConfigFile().path) {
+            Extension.appendLineToOutputChannel("SKIP config file");
+            return;
+        }
+        if (micromatch.isMatch(vscode.workspace.asRelativePath(uri.path), Configs.getConfigs().ignore)) {
+            Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
+            return;
+        }
+
+        vscode.workspace.fs.stat(uri).then((fileStat) => {
+            if (fileStat.type === vscode.FileType.File) {
+                Targets.delete(uri);
+            } else {
+                Targets.deleteDir(uri);
+            }
+        });
     });
 
     // The commandId parameter must match the command field in package.json
