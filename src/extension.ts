@@ -161,10 +161,6 @@ export function activate(context: vscode.ExtensionContext) {
         if (Configs.getConfigs().uploadOnSave === false) {
             return;
         }
-        if (uri.path === Configs.getConfigFile().path) {
-            Extension.appendLineToOutputChannel("SKIP config file");
-            return;
-        }
         if (Extension.isUriIgnored(uri)) {
             Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
             return;
@@ -190,7 +186,17 @@ export function activate(context: vscode.ExtensionContext) {
         if (Extension.isUriIgnored(uri)) {
             return;
         }
-        Targets.upload(uri);
+        Extension.isLikeFile(uri).then((isFile) => {
+            if (isFile) {
+                Targets.upload(uri);
+            } else {
+                vscode.workspace.findFiles(vscode.workspace.asRelativePath(uri) + "/**/*").then((files) => {
+                    files.forEach((uri) => {
+                        Targets.upload(uri);
+                    });
+                });
+            }
+        });
     });
     fileWatcher.onDidDelete((uri) => {
         // console.log("onDidDelete", uri);
@@ -227,7 +233,9 @@ export function activate(context: vscode.ExtensionContext) {
                 if (!uri && vscode.window.activeTextEditor?.document.uri) {
                     uri = vscode.window.activeTextEditor?.document.uri;
                 }
-                thisArg = [uri];
+                if (uri) {
+                    thisArg = [uri];
+                }
             }
             if (!thisArg) {
                 Extension.showErrorMessage("Can't find files for uploading");
@@ -266,10 +274,12 @@ export function activate(context: vscode.ExtensionContext) {
                 if (!uri && vscode.window.activeTextEditor?.document.uri) {
                     uri = vscode.window.activeTextEditor?.document.uri;
                 }
-                thisArg = [uri];
+                if (uri) {
+                    thisArg = [uri];
+                }
             }
             if (!thisArg) {
-                Extension.showErrorMessage("Can't files for uploading");
+                Extension.showErrorMessage("Can't find files for uploading");
                 return;
             }
 
