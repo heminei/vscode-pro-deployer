@@ -121,9 +121,9 @@ export class SFTP extends EventEmitter implements TargetInterface {
                                 message:
                                     job.action[0].toUpperCase() +
                                     job.action.slice(1) +
-                                    " => " +
-                                    this.queue.getPendingTasks().length +
-                                    " pending" +
+                                    " (" +
+                                    (this.queue.getPendingTasks().length + 1) +
+                                    " pending) => " +
                                     vscode.workspace.asRelativePath(job.uri),
                             });
                         };
@@ -132,9 +132,9 @@ export class SFTP extends EventEmitter implements TargetInterface {
                                 message:
                                     job.action[0].toUpperCase() +
                                     job.action.slice(1) +
-                                    " => " +
-                                    this.queue.getPendingTasks().length +
-                                    " pending" +
+                                    " (" +
+                                    (this.queue.getPendingTasks().length + 1) +
+                                    " pending) => " +
                                     vscode.workspace.asRelativePath(job.uri),
                             });
                         };

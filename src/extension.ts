@@ -3,6 +3,7 @@ import { Configs } from "./configs";
 import { Targets } from "./targets/Targets";
 import fs = require("fs");
 import micromatch = require("micromatch");
+import parser = require("gitignore-parser");
 
 export class Extension {
     public static mode = "prod";
@@ -74,6 +75,20 @@ export class Extension {
         if (micromatch.isMatch(vscode.workspace.asRelativePath(uri.path), Configs.getConfigs().ignore)) {
             Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
             return true;
+        }
+        if (Configs.getConfigs().checkGitignore) {
+            if (fs.existsSync(Configs.getGitignoreFile().path)) {
+                if (
+                    parser
+                        .compile(fs.readFileSync(Configs.getGitignoreFile().path).toString())
+                        .denies(vscode.workspace.asRelativePath(uri.path))
+                ) {
+                    Extension.appendLineToOutputChannel(
+                        "File ignored by .gitignore: " + vscode.workspace.asRelativePath(uri.path)
+                    );
+                    return true;
+                }
+            }
         }
         return false;
     }

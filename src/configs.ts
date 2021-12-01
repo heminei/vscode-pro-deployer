@@ -8,6 +8,7 @@ export class Configs {
     public static readonly sampleConfig = {
         uploadOnSave: true,
         autoDelete: true,
+        checkGitignore: false,
         activeTargets: ["My FTP"],
         concurrency: 5,
         ignore: [".git/**/*", ".vscode/**/*"],
@@ -38,7 +39,7 @@ export class Configs {
     public static readonly defaultConfigs: ConfigsInterface = {
         autoDelete: true,
         uploadOnSave: true,
-        checkGitignore: true,
+        checkGitignore: false,
         concurrency: 5,
         ignore: [".git/**/*", ".vscode/**/*"],
         activeTargets: [],

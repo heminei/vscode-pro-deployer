@@ -1,6 +1,6 @@
 # pro-deployer
 
-PRO Deployer - Simple and powerful SFTP/FTP deployer. Support concurrency uploading or delete files (**very fast uploading and deleting files or folders**).
+PRO Deployer - Simple and powerful SFTP/FTP deployer. Support **concurrency** uploading or delete files (**very fast uploading and deleting files or folders**).
 
 ## Features
 
@@ -14,6 +14,10 @@ PRO Deployer - Simple and powerful SFTP/FTP deployer. Support concurrency upload
 -   support SSH keys
 -   support auto upload and remove files changed on disk, e.g triggered by another application
 
+## Donation
+
+If you like this extension, you could become a backer or sponsor via **[PayPal](https://www.paypal.com/paypalme/hemineibg1)**. Any amount is welcome. It will encourage me to make this extension better and better!
+
 ## Usage
 
 1. Ctrl+Shift+P on Windows/Linux or Cmd+Shift+P on Mac open command palette, run `PRO Deployer: Generate Config File`.
@@ -25,6 +29,7 @@ PRO Deployer - Simple and powerful SFTP/FTP deployer. Support concurrency upload
 {
     "uploadOnSave": true,
     "autoDelete": true,
+    "checkGitignore": false, //skip files that are ignored in .gitignore
     "activeTargets": [
         "My FTP"
     ],
