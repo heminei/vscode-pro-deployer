@@ -21,6 +21,7 @@ export class Configs {
                 user: "admin",
                 password: "123456",
                 dir: "/",
+                transferDataType: "binary",
             },
             {
                 name: "My SFTP",
@@ -33,7 +34,7 @@ export class Configs {
                 privateKey: null,
                 passphrase: null,
             },
-        ],
+        ] as TargetOptionsInterface[],
     };
 
     public static readonly defaultConfigs: ConfigsInterface = {

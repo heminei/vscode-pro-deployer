@@ -13,6 +13,7 @@ PRO Deployer - Simple and powerful SFTP/FTP deployer. Support **concurrency** up
 -   add `Upload` and `Upload to` buttons to a context menu
 -   support SSH keys
 -   support auto upload and remove files changed on disk, e.g triggered by another application
+-   support `binary` and `ascii` data transfer types
 
 ## Donation
 
@@ -46,7 +47,8 @@ If you like this extension, you could become a backer or sponsor via **[PayPal](
             "port": 21,
             "user": "admin",
             "password": "123456",
-            "dir": "/public_html"
+            "dir": "/public_html",
+            "transferDataType": "binary"
         },
         {
             "name": "My SFTP",

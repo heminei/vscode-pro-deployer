@@ -53,8 +53,20 @@ export class FTP extends EventEmitter implements TargetInterface {
         }
 
         this.once("ready", () => {
-            cb();
-            Extension.appendLineToOutputChannel("[INFO][FTP] Connected successfully to: " + this.options.host);
+            if (this.options.transferDataType === "ascii") {
+                this.client.ascii((err) => {
+                    if (err) {
+                        errorCb(err);
+                        return;
+                    }
+                    cb();
+                    Extension.appendLineToOutputChannel("[INFO][FTP] Connected successfully to: " + this.options.host);
+                    Extension.appendLineToOutputChannel("[INFO][FTP] Set transfer data type to: ascii");
+                });
+            } else {
+                cb();
+                Extension.appendLineToOutputChannel("[INFO][FTP] Connected successfully to: " + this.options.host);
+            }
         });
         this.once("error", (error) => {
             errorCb(error);
@@ -78,6 +90,9 @@ export class FTP extends EventEmitter implements TargetInterface {
 
         if (!this.options.port) {
             this.options.port = 21;
+        }
+        if (!this.options.transferDataType) {
+            this.options.transferDataType = "binary";
         }
         Extension.appendLineToOutputChannel("INFO][FTP] Connecting to: " + this.options.host);
         this.client.connect({

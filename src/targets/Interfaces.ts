@@ -22,6 +22,7 @@ export interface TargetOptionsInterface {
     secure?: boolean;
     privateKey?: string;
     passphrase?: string;
+    transferDataType?: "binary" | "ascii";
 }
 
 export interface TargetInterface {
