@@ -26,6 +26,8 @@ If you like this extension, you could become a backer or sponsor via **[PayPal](
 
 ## Example Configs
 
+Config file location: `.vscode/pro-deployer.json`
+
 ```js
 {
     "uploadOnSave": true,
