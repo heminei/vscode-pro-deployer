@@ -5,7 +5,9 @@ import { Extension } from "./extension";
 import { ConfigsInterface, TargetOptionsInterface } from "./targets/Interfaces";
 
 export class Configs {
-    public static readonly sampleConfig = {
+    public static readonly sampleConfig: ConfigsInterface = {
+        enableStatusBarItem: true,
+        enableQuickPick: false,
         uploadOnSave: true,
         autoDelete: true,
         checkGitignore: false,
@@ -38,6 +40,8 @@ export class Configs {
     };
 
     public static readonly defaultConfigs: ConfigsInterface = {
+        enableStatusBarItem: true,
+        enableQuickPick: false,
         autoDelete: true,
         uploadOnSave: true,
         checkGitignore: false,

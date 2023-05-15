@@ -21,6 +21,11 @@ export class Queue<T extends Task<any>> extends EventEmitter {
         return this.pendingTasks;
     }
 
+    public removeAllPendingTasks(): this {
+        this.pendingTasks = [];
+        return this;
+    }
+
     public push(task: T): this {
         this.pendingTasks.push(task);
         if (this.autostart === true) {

@@ -9,6 +9,7 @@ export class Extension {
     public static mode = "prod";
     public static extensionContext: vscode.ExtensionContext;
     public static outputChannel: vscode.OutputChannel | null;
+    public static statusBarItem: vscode.StatusBarItem | null;
 
     public static init() {
         Extension.outputChannel = vscode.window.createOutputChannel("PRO Deployer");
@@ -111,63 +112,12 @@ export function activate(context: vscode.ExtensionContext) {
             }
         });
     });
-
-    // vscode.workspace.onDidChangeWorkspaceFolders((e) => {
-    // console.log("onDidChangeWorkspaceFolders", vscode.workspace.workspaceFolders, e);
-    // });
-    // vscode.workspace.onWillDeleteFiles((e) => {
-    //     console.log("onWillDeleteFiles", e);
-    //     if (Configs.getConfigs().autoDelete === false) {
-    //         return;
-    //     }
-    //     e.files.forEach((uri) => {
-    //         if (uri.path === Configs.getConfigFile().path) {
-    //             Extension.appendLineToOutputChannel("SKIP config file");
-    //             return;
-    //         }
-    //         if (micromatch.isMatch(vscode.workspace.asRelativePath(uri.path), Configs.getConfigs().ignore)) {
-    //             Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
-    //             return;
-    //         }
-
-    //         vscode.workspace.fs.stat(uri).then((fileStat) => {
-    //             if (fileStat.type === vscode.FileType.File) {
-    //                 Targets.delete(uri);
-    //             } else {
-    //                 Targets.deleteDir(uri);
-    //             }
-    //         });
-    //     });
-    // });
-    // vscode.workspace.onDidSaveTextDocument((e) => {
-    //     if (Configs.getConfigs().uploadOnSave === false) {
-    //         return;
-    //     }
-    //     let uri = e.uri;
-    //     if (uri.path === Configs.getConfigFile().path) {
-    //         Extension.appendLineToOutputChannel("SKIP config file");
-    //         return;
-    //     }
-    //     if (micromatch.isMatch(vscode.workspace.asRelativePath(uri.path), Configs.getConfigs().ignore)) {
-    //         Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
-    //         return;
-    //     }
-    //     Targets.upload(uri);
-    // });
-    // vscode.workspace.onDidRenameFiles((e) => {
-    //     console.log("onDidRenameFiles", e);
-    //     e.files.forEach((item) => {
-    //         let uri = item.oldUri;
-    //         Extension.appendLineToOutputChannel("File renamed: " + uri.path);
-    //         vscode.workspace.fs.stat(item.newUri).then((fileStat) => {
-    //             if (fileStat.type === vscode.FileType.File) {
-    //                 Targets.delete(uri);
-    //             } else {
-    //                 Targets.deleteDir(uri);
-    //             }
-    //         });
-    //     });
-    // });
+    if (Configs.getConfigs().enableStatusBarItem) {
+        Extension.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
+        Extension.statusBarItem.text = "$(extensions-sync-enabled) PRO Deployer";
+        Extension.statusBarItem.command = "pro-deployer.show-output-channel";
+        Extension.statusBarItem.show();
+    }
 
     const fileWatcher = vscode.workspace.createFileSystemWatcher("**/*");
 
@@ -240,6 +190,18 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.generate-config-file", () => {
             Configs.generateConfigFile();
+        })
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand("pro-deployer.show-output-channel", () => {
+            Extension.outputChannel?.show(true);
+        })
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand("pro-deployer.cancel-all-uploads", () => {
+            Targets.getItems().forEach((item) => {
+                item.getQueue().end().removeAllPendingTasks();
+            });
         })
     );
     context.subscriptions.push(
@@ -347,5 +309,8 @@ export function deactivate() {
     Targets.destroyAllTargets();
     if (Extension.outputChannel) {
         Extension.outputChannel.dispose();
+    }
+    if (Extension.statusBarItem) {
+        Extension.statusBarItem.dispose();
     }
 }

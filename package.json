@@ -2,7 +2,7 @@
     "name": "pro-deployer",
     "displayName": "PRO Deployer - SFTP/FTP deployer",
     "description": "PRO Deployer - Simple and powerful SFTP/FTP deployer",
-    "version": "1.2.1",
+    "version": "1.3.1",
     "publisher": "heminei",
     "categories": [
         "Other"
@@ -50,6 +50,16 @@
                 "command": "pro-deployer.upload-all-open",
                 "title": "Upload All Open Files To...",
                 "category": "PRO Deployer"
+            },
+            {
+                "command": "pro-deployer.show-output-channel",
+                "title": "Show Output Channel",
+                "category": "PRO Deployer"
+            },
+            {
+                "command": "pro-deployer.cancel-all-uploads",
+                "title": "Cancel all uploads",
+                "category": "PRO Deployer"
             }
         ],
         "keybindings": [
@@ -95,12 +105,12 @@
         "gitignore-parser": "^0.0.2",
         "micromatch": "^4.0.5",
         "path": "^0.12.7",
-        "ssh2": "^1.11.0"
+        "ssh2": "^1.13.0"
     },
     "devDependencies": {
         "@types/ftp": "^0.3.33",
-        "@types/gitignore-parser": "0.0.0",
-        "@types/glob": "^8.0.0",
+        "@types/gitignore-parser": "^0.0.0",
+        "@types/glob": "^8.1.0",
         "@types/micromatch": "^4.0.2",
         "@types/mocha": "^10.0.1",
         "@types/node": "16.x",
@@ -108,9 +118,9 @@
         "@typescript-eslint/eslint-plugin": "^5.48.0",
         "@typescript-eslint/parser": "^5.48.0",
         "@vscode/test-electron": "^2.2.1",
-        "@types/ssh2": "^1.11.6",
-        "eslint": "^8.31.0",
-        "glob": "^8.0.3",
+        "@types/ssh2": "^1.11.11",
+        "eslint": "^8.40.0",
+        "glob": "^10.2.4",
         "mocha": "^10.2.0",
         "typescript": "^4.9.4"
     }

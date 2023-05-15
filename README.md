@@ -4,16 +4,18 @@ PRO Deployer - Simple and powerful SFTP/FTP deployer. Support **concurrency** up
 
 ## Features
 
--   multiple targets
--   switchable profiles
--   upload on save
--   auto-delete files or folders
--   concurrency upload and delete files
--   ignore list
--   add `Upload` and `Upload to` buttons to a context menu
--   support SSH keys
--   support auto upload and remove files changed on disk, e.g triggered by another application
--   support `binary` and `ascii` data transfer types
+- multiple targets
+- switchable profiles
+- upload on save
+- auto-delete files or folders
+- concurrency upload and delete files
+- ignore list
+- add `Upload` and `Upload to` buttons to a context menu
+- support SSH keys
+- support auto upload and remove files changed on disk, e.g triggered by another application
+- support `binary` and `ascii` data transfer types
+- support status bar item
+- support quick pick dialog
 
 ## Donation
 
@@ -30,6 +32,8 @@ Config file location: `.vscode/pro-deployer.json`
 
 ```js
 {
+    "enableStatusBarItem": true,
+    "enableQuickPick": false, //enable quick pick when upload/error occurs
     "uploadOnSave": true,
     "autoDelete": true,
     "checkGitignore": false, //skip files that are ignored in .gitignore
@@ -72,7 +76,9 @@ Config file location: `.vscode/pro-deployer.json`
 
 This extension contributes the following commands:
 
--   `pro-deployer.generate-config-file`: auto generate config file
--   `pro-deployer.upload`: upload file or folder
--   `pro-deployer.upload-to`: upload file or folder to selected target
--   `pro-deployer.upload-all-open`: upload all open files
+- `pro-deployer.generate-config-file`: auto generate config file
+- `pro-deployer.upload`: upload file or folder
+- `pro-deployer.upload-to`: upload file or folder to selected target
+- `pro-deployer.upload-all-open`: upload all open files
+- `pro-deployer.show-output-channel`: show output channel of PRO Deployer
+- `pro-deployer.cancel-all-uploads`: stop all uploads and remove all files from queue

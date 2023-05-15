@@ -104,53 +104,91 @@ export class SFTP extends EventEmitter implements TargetInterface {
             passphrase: this.options.passphrase,
         });
 
-        this.queue.on("start", () => {
-            vscode.window.withProgress(
-                {
-                    location: vscode.ProgressLocation.Notification,
-                    title: this.name,
-                    cancellable: true,
-                },
-                (progress, token) => {
-                    token.onCancellationRequested(() => {
-                        this.queue.end();
-                    });
-                    return new Promise<boolean>((resolve, reject) => {
-                        const onStartCallback = (job: QueueTask) => {
-                            progress.report({
-                                message:
-                                    job.action[0].toUpperCase() +
-                                    job.action.slice(1) +
-                                    " (" +
-                                    (this.queue.getPendingTasks().length + 1) +
-                                    " pending) => " +
-                                    vscode.workspace.asRelativePath(job.uri),
-                            });
-                        };
-                        const onErrorCallback = (job: QueueTask) => {
-                            progress.report({
-                                message:
-                                    job.action[0].toUpperCase() +
-                                    job.action.slice(1) +
-                                    " (" +
-                                    (this.queue.getPendingTasks().length + 1) +
-                                    " pending) => " +
-                                    vscode.workspace.asRelativePath(job.uri),
-                            });
-                        };
-                        this.queue.on("task.success", onStartCallback);
-                        this.queue.on("task.error", onErrorCallback);
-                        this.queue.once("end", () => {
-                            this.queue.off("task.success", onStartCallback);
-                            this.queue.off("task.error", onErrorCallback);
-                            setTimeout(() => {
-                                resolve(true);
-                            }, 500);
-                        });
-                    });
+        if (Configs.getConfigs().enableStatusBarItem) {
+            let hasErrors = false;
+            let statusBarCheckTimer: NodeJS.Timeout | undefined = undefined;
+            this.queue.on("start", () => {
+                Extension.statusBarItem!.text = "$(sync~spin) PRO Deployer: Uploading...";
+                statusBarCheckTimer = setInterval(() => {
+                    Extension.statusBarItem!.text =
+                        "$(sync~spin) PRO Deployer: Uploading (" + (this.queue.getPendingTasks().length + 1) + ")...";
+                }, 1000);
+            });
+            this.queue.on("end", () => {
+                if (hasErrors) {
+                    Extension.statusBarItem!.text = "$(extensions-warning-message) PRO Deployer";
+                    Extension.statusBarItem!.tooltip = "Has some errors, click to see the output channel";
+                } else {
+                    Extension.statusBarItem!.text = "$(sync) PRO Deployer";
+                    Extension.statusBarItem!.tooltip = "";
                 }
-            );
-        });
+                if (statusBarCheckTimer) {
+                    clearInterval(statusBarCheckTimer);
+                }
+            });
+            this.queue.on("task.success", (job: QueueTask) => {
+                Extension.statusBarItem!.tooltip =
+                    job.action[0].toUpperCase() +
+                    job.action.slice(1) +
+                    " (" +
+                    (this.queue.getPendingTasks().length + 1) +
+                    " pending) => " +
+                    vscode.workspace.asRelativePath(job.uri);
+            });
+            this.queue.on("task.error", (job: QueueTask) => {
+                hasErrors = true;
+            });
+        }
+
+        if (Configs.getConfigs().enableQuickPick) {
+            this.queue.on("start", () => {
+                vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: this.name,
+                        cancellable: true,
+                    },
+                    (progress, token) => {
+                        token.onCancellationRequested(() => {
+                            this.queue.end();
+                        });
+                        return new Promise<boolean>((resolve, reject) => {
+                            const onStartCallback = (job: QueueTask) => {
+                                progress.report({
+                                    message:
+                                        job.action[0].toUpperCase() +
+                                        job.action.slice(1) +
+                                        " (" +
+                                        (this.queue.getPendingTasks().length + 1) +
+                                        " pending) => " +
+                                        vscode.workspace.asRelativePath(job.uri),
+                                });
+                            };
+                            const onErrorCallback = (job: QueueTask) => {
+                                progress.report({
+                                    message:
+                                        job.action[0].toUpperCase() +
+                                        job.action.slice(1) +
+                                        " (" +
+                                        (this.queue.getPendingTasks().length + 1) +
+                                        " pending) => " +
+                                        vscode.workspace.asRelativePath(job.uri),
+                                });
+                            };
+                            this.queue.on("task.success", onStartCallback);
+                            this.queue.on("task.error", onErrorCallback);
+                            this.queue.once("end", () => {
+                                this.queue.off("task.success", onStartCallback);
+                                this.queue.off("task.error", onErrorCallback);
+                                setTimeout(() => {
+                                    resolve(true);
+                                }, 500);
+                            });
+                        });
+                    }
+                );
+            });
+        }
     }
     upload(uri: vscode.Uri): Promise<vscode.Uri> {
         const relativePath = vscode.workspace.asRelativePath(uri);
@@ -275,158 +313,9 @@ export class SFTP extends EventEmitter implements TargetInterface {
     deleteDir(uri: vscode.Uri): Promise<vscode.Uri> {
         const relativePath = vscode.workspace.asRelativePath(uri);
 
-        // let files: ReadDirPath[] = [];
-        // const readdir = (dir: string) => {
-        //     Extension.appendLineToOutputChannel("[INFO][SFTP] Read dir: " + dir);
-        //     return new Promise<ReadDirPath[]>((resolve, reject) => {
-        //         let promises: Promise<ReadDirPath[]>[] = [];
-        //         this.sftp?.readdir(this.options.dir + "/" + dir, (err, list) => {
-        //             if (err) {
-        //                 if (err.message.indexOf("No such file") !== -1) {
-        //                     resolve([]);
-        //                     return;
-        //                 }
-        //             }
-
-        //             list.forEach((file) => {
-        //                 if (file.longname.substr(0, 1) === "d") {
-        //                     const subPromise = readdir(dir + "/" + file.filename);
-        //                     promises.push(subPromise);
-        //                     // subPromise.then((subFiles) => {
-        //                     //     files.concat(subFiles);
-        //                     // });
-        //                 }
-        //                 files.push({
-        //                     uri: vscode.Uri.parse(
-        //                         Extension.getActiveWorkspaceFolderPath() + "/" + dir + "/" + file.filename
-        //                     ),
-        //                     type: file.longname.substr(0, 1) === "d" ? "dir" : "file",
-        //                 });
-        //             });
-
-        //             Promise.all(promises).then(
-        //                 () => {
-        //                     resolve(files);
-        //                 },
-        //                 (reason) => {
-        //                     reject(reason);
-        //                 }
-        //             );
-        //         });
-        //     });
-        // };
-
         return new Promise<vscode.Uri>((resolve, reject) => {
             this.connect(
                 () => {
-                    // readdir(relativePath).then(
-                    //     (fileEntries) => {
-                    //         const dirs = fileEntries.filter((file) => {
-                    //             return file.type === "dir";
-                    //         });
-                    //         const files = fileEntries.filter((file) => {
-                    //             return file.type === "file";
-                    //         });
-
-                    //         Extension.appendLineToOutputChannel("[INFO][SFTP] Total dirs: " + dirs.length);
-                    //         Extension.appendLineToOutputChannel("[INFO][SFTP] Total files: " + files.length);
-
-                    //         const filePromises = [] as Promise<vscode.Uri>[];
-                    //         files.forEach((file) => {
-                    //             filePromises.push(this.delete(file.uri));
-                    //         });
-
-                    //         Promise.all(filePromises).then(() => {
-                    //             dirs.forEach((file) => {
-                    //                 const job = <QueueTask>((cb) => {
-                    //                     Extension.appendLineToOutputChannel(
-                    //                         "[INFO][SFTP] Start deleting dir: " +
-                    //                             this.options.dir +
-                    //                             "/" +
-                    //                             vscode.workspace.asRelativePath(file.uri)
-                    //                     );
-                    //                     this.sftp?.rmdir(
-                    //                         this.options.dir + "/" + vscode.workspace.asRelativePath(file.uri),
-                    //                         (err) => {
-                    //                             if (err) {
-                    //                                 if (err.message.indexOf("No such file") !== -1) {
-                    //                                     Extension.appendLineToOutputChannel(
-                    //                                         "[INFO][SFTP] Dir deleted (No such file): '" +
-                    //                                             this.options.dir +
-                    //                                             "/" +
-                    //                                             vscode.workspace.asRelativePath(file.uri)
-                    //                                     );
-                    //                                     cb();
-                    //                                     return;
-                    //                                 }
-                    //                                 cb(err);
-                    //                                 return;
-                    //                             }
-                    //                             Extension.appendLineToOutputChannel(
-                    //                                 "[INFO][SFTP] Dir deleted: '" +
-                    //                                     this.options.dir +
-                    //                                     "/" +
-                    //                                     vscode.workspace.asRelativePath(file.uri)
-                    //                             );
-                    //                             cb();
-                    //                         }
-                    //                     );
-                    //                 });
-                    //                 job.uri = uri;
-                    //                 job.action = "delete";
-                    //                 job.isFile = false;
-                    //                 this.queue.push(job);
-                    //             });
-
-                    //             const job = <QueueTask>((cb) => {
-                    //                 const timer = setInterval(() => {
-                    //                     if (
-                    //                         this.queue.getPendingTasks().filter((task) => {
-                    //                             return task.action === "delete";
-                    //                         }).length > 0
-                    //                     ) {
-                    //                         return;
-                    //                     }
-                    //                     Extension.appendLineToOutputChannel(
-                    //                         "[INFO][SFTP] Start deleting dir: " + this.options.dir + "/" + relativePath
-                    //                     );
-                    //                     this.sftp?.rmdir(this.options.dir + "/" + relativePath, (err) => {
-                    //                         if (err) {
-                    //                             if (err.message.indexOf("No such file") !== -1) {
-                    //                                 Extension.appendLineToOutputChannel(
-                    //                                     "[INFO][SFTP] Dir deleted (No such file): '" +
-                    //                                         this.options.dir +
-                    //                                         "/" +
-                    //                                         relativePath
-                    //                                 );
-                    //                                 cb();
-                    //                                 resolve(uri);
-                    //                                 return;
-                    //                             }
-                    //                             cb(err);
-                    //                             reject(err);
-                    //                             return;
-                    //                         }
-                    //                         Extension.appendLineToOutputChannel(
-                    //                             "[INFO][SFTP] Dir deleted: '" + this.options.dir + "/" + relativePath
-                    //                         );
-                    //                         cb();
-                    //                         resolve(uri);
-                    //                     });
-                    //                     clearInterval(timer);
-                    //                 }, 500);
-                    //             });
-                    //             job.uri = uri;
-                    //             job.action = "delete";
-                    //             job.isFile = false;
-                    //             this.queue.push(job);
-                    //         });
-                    //     },
-                    //     (reason) => {
-                    //         reject(reason);
-                    //     }
-                    // );
-
                     const job = <QueueTask>((cb) => {
                         const dir = this.options.dir + "/" + relativePath;
                         if (dir === "/") {
@@ -518,6 +407,10 @@ export class SFTP extends EventEmitter implements TargetInterface {
 
     getName(): string {
         return this.name;
+    }
+
+    getQueue(): Queue<QueueTask> {
+        return this.queue;
     }
 
     destroy() {

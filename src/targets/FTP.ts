@@ -110,51 +110,80 @@ export class FTP extends EventEmitter implements TargetInterface {
         });
 
         this.queue.on("start", () => {
-            vscode.window.withProgress(
-                {
-                    location: vscode.ProgressLocation.Notification,
-                    title: this.name,
-                    cancellable: true,
-                },
-                (progress, token) => {
-                    token.onCancellationRequested(() => {
-                        this.queue.end();
-                    });
-                    return new Promise<boolean>((resolve, reject) => {
-                        const onStartCallback = (job: QueueTask) => {
-                            progress.report({
-                                message:
-                                    job.action[0].toUpperCase() +
-                                    job.action.slice(1) +
-                                    " (" +
-                                    (this.queue.getPendingTasks().length + 1) +
-                                    " pending) => " +
-                                    vscode.workspace.asRelativePath(job.uri),
-                            });
-                        };
-                        const onErrorCallback = (job: QueueTask) => {
-                            progress.report({
-                                message:
-                                    job.action[0].toUpperCase() +
-                                    job.action.slice(1) +
-                                    " (" +
-                                    (this.queue.getPendingTasks().length + 1) +
-                                    " pending) => " +
-                                    vscode.workspace.asRelativePath(job.uri),
-                            });
-                        };
-                        this.queue.on("task.success", onStartCallback);
-                        this.queue.on("task.error", onErrorCallback);
-                        this.queue.once("end", () => {
-                            this.queue.off("task.success", onStartCallback);
-                            this.queue.off("task.error", onErrorCallback);
-                            setTimeout(() => {
-                                resolve(true);
-                            }, 500);
+            if (Configs.getConfigs().enableStatusBarItem) {
+                let hasErrors = false;
+                this.queue.on("start", () => {
+                    Extension.statusBarItem!.text = "$(sync~spin) PRO Deployer: Uploading...";
+                });
+                this.queue.on("end", () => {
+                    if (hasErrors) {
+                        Extension.statusBarItem!.text = "$(extensions-warning-message) PRO Deployer";
+                        Extension.statusBarItem!.tooltip = "Has some errors, click to see the output channel";
+                    } else {
+                        Extension.statusBarItem!.text = "$(sync) PRO Deployer";
+                        Extension.statusBarItem!.tooltip = "";
+                    }
+                });
+                this.queue.on("task.success", (job: QueueTask) => {
+                    Extension.statusBarItem!.tooltip =
+                        job.action[0].toUpperCase() +
+                        job.action.slice(1) +
+                        " (" +
+                        (this.queue.getPendingTasks().length + 1) +
+                        " pending) => " +
+                        vscode.workspace.asRelativePath(job.uri);
+                });
+                this.queue.on("task.error", (job: QueueTask) => {
+                    hasErrors = true;
+                });
+            }
+            if (Configs.getConfigs().enableQuickPick) {
+                vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: this.name,
+                        cancellable: true,
+                    },
+                    (progress, token) => {
+                        token.onCancellationRequested(() => {
+                            this.queue.end();
                         });
-                    });
-                }
-            );
+                        return new Promise<boolean>((resolve, reject) => {
+                            const onStartCallback = (job: QueueTask) => {
+                                progress.report({
+                                    message:
+                                        job.action[0].toUpperCase() +
+                                        job.action.slice(1) +
+                                        " (" +
+                                        (this.queue.getPendingTasks().length + 1) +
+                                        " pending) => " +
+                                        vscode.workspace.asRelativePath(job.uri),
+                                });
+                            };
+                            const onErrorCallback = (job: QueueTask) => {
+                                progress.report({
+                                    message:
+                                        job.action[0].toUpperCase() +
+                                        job.action.slice(1) +
+                                        " (" +
+                                        (this.queue.getPendingTasks().length + 1) +
+                                        " pending) => " +
+                                        vscode.workspace.asRelativePath(job.uri),
+                                });
+                            };
+                            this.queue.on("task.success", onStartCallback);
+                            this.queue.on("task.error", onErrorCallback);
+                            this.queue.once("end", () => {
+                                this.queue.off("task.success", onStartCallback);
+                                this.queue.off("task.error", onErrorCallback);
+                                setTimeout(() => {
+                                    resolve(true);
+                                }, 500);
+                            });
+                        });
+                    }
+                );
+            }
         });
     }
     upload(uri: vscode.Uri, attempts = 1): Promise<vscode.Uri> {
@@ -325,6 +354,10 @@ export class FTP extends EventEmitter implements TargetInterface {
 
     getName(): string {
         return this.name;
+    }
+
+    getQueue(): Queue<QueueTask> {
+        return this.queue;
     }
 
     destroy() {

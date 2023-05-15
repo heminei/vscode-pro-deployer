@@ -2,6 +2,8 @@ import * as vscode from "vscode";
 import * as Queue from "./../Queue";
 
 export interface ConfigsInterface {
+    enableStatusBarItem?: true;
+    enableQuickPick?: false;
     autoDelete?: boolean;
     uploadOnSave?: boolean;
     checkGitignore?: boolean;
@@ -32,6 +34,7 @@ export interface TargetInterface {
     deleteDir(uri: vscode.Uri): Promise<vscode.Uri>;
     destroy(): void;
     getName(): string;
+    getQueue(): Queue.Queue<QueueTask>;
 }
 
 export enum TargetTypes {

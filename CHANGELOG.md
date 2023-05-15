@@ -4,34 +4,42 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [1.3.1]
+
+- added new option: enableStatusBarItem
+- added new option: enableQuickPick
+- added status bar item. Enabled by default.
+- added a new command: `pro-deployer.cancel-all-uploads`
+- added a new command: `pro-deployer.show-output-channel`
+
 ## [1.2.1]
 
--   added transferDataType option
--   update dependencies
+- added transferDataType option
+- update dependencies
 
 ## [1.1.1]
 
--   fixed bugs
--   added a new option: checkGitignore
+- fixed bugs
+- added a new option: checkGitignore
 
 ## [1.0.1]
 
--   fixed bugs
--   implement file watcher
--   added new command: `pro-deployer.upload-all-open`
+- fixed bugs
+- implement file watcher
+- added new command: `pro-deployer.upload-all-open`
 
 ## [0.9.6]
 
--   fixed bugs when run upload command and in project missing .gitignore file
+- fixed bugs when run upload command and in project missing .gitignore file
 
 ## [0.9.5]
 
--   fixed bugs in FTP target
+- fixed bugs in FTP target
 
 ## [0.9.3]
 
--   added icon
+- added icon
 
 ## [0.9.1]
 
--   Initial release
+- Initial release
