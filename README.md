@@ -32,15 +32,15 @@ Config file location: `.vscode/pro-deployer.json`
 
 ```js
 {
-    "enableStatusBarItem": true,
+    "enableStatusBarItem": true, //enable extension status bar item
     "enableQuickPick": false, //enable quick pick when upload/error occurs
-    "uploadOnSave": true,
-    "autoDelete": true,
+    "uploadOnSave": true, //on file change will be uploaded to active targets
+    "autoDelete": true, //on file delete will be deleted to active targets
     "checkGitignore": false, //skip files that are ignored in .gitignore
     "activeTargets": [
         "My FTP"
     ],
-    "concurrency": 5,
+    "concurrency": 5, //maximum number of concurrent actions (upload/delete)
     "ignore": [
         ".git/**/*",
         ".vscode/**/*"

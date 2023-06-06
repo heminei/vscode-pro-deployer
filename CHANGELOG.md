@@ -4,6 +4,11 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [2.1.0]
+
+- performance optimizations
+- UX optimizations
+
 ## [1.3.1]
 
 - added new option: enableStatusBarItem

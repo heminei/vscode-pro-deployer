@@ -78,11 +78,11 @@ export class Queue<T extends Task<any>> extends EventEmitter {
 
     public end(): this {
         this.running = false;
-        this.emit("end");
-
         this.pendingTasks = [];
         this.executionTasks = [];
         this.executedTasks = [];
+
+        this.emit("end");
 
         return this;
     }

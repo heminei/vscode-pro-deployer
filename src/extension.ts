@@ -4,6 +4,7 @@ import { Targets } from "./targets/Targets";
 import fs = require("fs");
 import micromatch = require("micromatch");
 import parser = require("gitignore-parser");
+import { QueueTask } from "./targets/Interfaces";
 
 export class Extension {
     public static mode = "prod";
@@ -34,8 +35,8 @@ export class Extension {
     }
 
     public static showErrorMessage(string: string) {
-        vscode.window.showErrorMessage("[PRO Deployer] " + string);
-        Extension.appendLineToOutputChannel("[ERROR] " + string);
+        Extension.appendLineToOutputChannel("[ERROR][showErrorMessage] " + string);
+        return vscode.window.showErrorMessage("[PRO Deployer] " + string);
     }
 
     public static isLikeFile(uri: vscode.Uri): Promise<boolean> {
@@ -104,6 +105,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     Configs.init(() => {
         Targets.destroyAllTargets();
+        Extension.statusBarItem?.dispose();
 
         Configs.getConfigs().targets?.forEach((targetConfig) => {
             let target = Targets.getTargetInstance(targetConfig);
@@ -111,13 +113,133 @@ export function activate(context: vscode.ExtensionContext) {
                 Targets.add(target);
             }
         });
+
+        if (Configs.getConfigs().enableStatusBarItem) {
+            Extension.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
+            Extension.statusBarItem.text = "$(sync) PRO Deployer";
+            Extension.statusBarItem.command = "pro-deployer.show-output-channel";
+            Extension.statusBarItem.show();
+        }
+
+        let statusBarCheckTimer: NodeJS.Timeout | undefined = undefined;
+        let tooltipText = "";
+        Targets.getActive().forEach((target) => {
+            target.getQueue().on("start", () => {
+                if (Configs.getConfigs().enableStatusBarItem) {
+                    Extension.statusBarItem!.text = "$(sync~spin) PRO Deployer";
+
+                    if (!statusBarCheckTimer) {
+                        statusBarCheckTimer = setInterval(() => {
+                            let allPendingTasks = 0;
+                            Targets.getActive().forEach((target) => {
+                                allPendingTasks += target.getQueue().getPendingTasks().length;
+                            });
+                            if (allPendingTasks > 1) {
+                                Extension.statusBarItem!.text =
+                                    "$(sync~spin) PRO Deployer: Uploading (" + (allPendingTasks + 1) + ")...";
+                                Extension.statusBarItem!.tooltip = tooltipText;
+                            }
+                        }, 300);
+                    }
+                }
+                if (Configs.getConfigs().enableQuickPick) {
+                    vscode.window.withProgress(
+                        {
+                            location: vscode.ProgressLocation.Notification,
+                            title: target.getName(),
+                            cancellable: true,
+                        },
+                        (progress, token) => {
+                            token.onCancellationRequested(() => {
+                                target.getQueue().end();
+                            });
+                            return new Promise<boolean>((resolve, reject) => {
+                                const onStartCallback = (job: QueueTask) => {
+                                    progress.report({
+                                        message:
+                                            job.action[0].toUpperCase() +
+                                            job.action.slice(1) +
+                                            " (" +
+                                            (target.getQueue().getPendingTasks().length + 1) +
+                                            " pending) => " +
+                                            vscode.workspace.asRelativePath(job.uri),
+                                    });
+                                };
+                                const onErrorCallback = (job: QueueTask) => {
+                                    progress.report({
+                                        message:
+                                            job.action[0].toUpperCase() +
+                                            job.action.slice(1) +
+                                            " (" +
+                                            (target.getQueue().getPendingTasks().length + 1) +
+                                            " pending) => " +
+                                            vscode.workspace.asRelativePath(job.uri),
+                                    });
+                                };
+                                target.getQueue().on("task.success", onStartCallback);
+                                target.getQueue().on("task.error", onErrorCallback);
+                                target.getQueue().once("end", () => {
+                                    target.getQueue().off("task.success", onStartCallback);
+                                    target.getQueue().off("task.error", onErrorCallback);
+                                    setTimeout(() => {
+                                        resolve(true);
+                                    }, 500);
+                                });
+                            });
+                        }
+                    );
+                }
+            });
+            target.getQueue().on("end", () => {
+                if (Configs.getConfigs().enableStatusBarItem) {
+                    let allPendingTasks = 0;
+                    Targets.getActive().forEach((target) => {
+                        allPendingTasks += target.getQueue().getPendingTasks().length;
+                    });
+
+                    if (allPendingTasks === 0) {
+                        Extension.statusBarItem!.text = "$(sync) PRO Deployer";
+                        Extension.statusBarItem!.tooltip = "";
+                        if (statusBarCheckTimer) {
+                            clearInterval(statusBarCheckTimer);
+                            statusBarCheckTimer = undefined;
+                        }
+                    }
+                }
+            });
+            target.getQueue().on("task.success", (job: QueueTask) => {
+                if (Configs.getConfigs().enableStatusBarItem) {
+                    Extension.statusBarItem!.backgroundColor = undefined;
+                    tooltipText =
+                        job.action[0].toUpperCase() +
+                        job.action.slice(1) +
+                        " (" +
+                        (target.getQueue().getPendingTasks().length + 1) +
+                        " pending) => " +
+                        vscode.workspace.asRelativePath(job.uri);
+                }
+            });
+            target.getQueue().on("task.error", (job: QueueTask, error: string) => {
+                Extension.showErrorMessage(
+                    target.getName() +
+                        " => Can't upload file: " +
+                        vscode.workspace.asRelativePath(job.uri) +
+                        ". Details: " +
+                        error
+                );
+                if (Configs.getConfigs().enableStatusBarItem) {
+                    Extension.statusBarItem!.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
+                    tooltipText =
+                        job.action[0].toUpperCase() +
+                        job.action.slice(1) +
+                        " (" +
+                        (target.getQueue().getPendingTasks().length + 1) +
+                        " pending) => ERROR: " +
+                        vscode.workspace.asRelativePath(job.uri);
+                }
+            });
+        });
     });
-    if (Configs.getConfigs().enableStatusBarItem) {
-        Extension.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
-        Extension.statusBarItem.text = "$(extensions-sync-enabled) PRO Deployer";
-        Extension.statusBarItem.command = "pro-deployer.show-output-channel";
-        Extension.statusBarItem.show();
-    }
 
     const fileWatcher = vscode.workspace.createFileSystemWatcher("**/*");
 
@@ -130,17 +252,20 @@ export function activate(context: vscode.ExtensionContext) {
             Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
             return;
         }
-
-        Extension.isLikeFile(uri).then((isFile) => {
-            if (isFile) {
-                Targets.upload(uri);
-            } else {
-                vscode.workspace.findFiles(vscode.workspace.asRelativePath(uri) + "/**/*").then((files) => {
-                    files.forEach((uri) => {
-                        Targets.upload(uri);
-                    });
+        Targets.getActive().forEach((target) => {
+            target.connect(() => {
+                Extension.isLikeFile(uri).then((isFile) => {
+                    if (isFile) {
+                        target.upload(uri);
+                    } else {
+                        vscode.workspace.findFiles(vscode.workspace.asRelativePath(uri) + "/**/*").then((files) => {
+                            files.forEach((uri) => {
+                                target.upload(uri);
+                            });
+                        });
+                    }
                 });
-            }
+            });
         });
     });
     fileWatcher.onDidChange((uri) => {
@@ -149,18 +274,23 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
         if (Extension.isUriIgnored(uri)) {
+            Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
             return;
         }
-        Extension.isLikeFile(uri).then((isFile) => {
-            if (isFile) {
-                Targets.upload(uri);
-            } else {
-                vscode.workspace.findFiles(vscode.workspace.asRelativePath(uri) + "/**/*").then((files) => {
-                    files.forEach((uri) => {
-                        Targets.upload(uri);
-                    });
+        Targets.getActive().forEach((target) => {
+            target.connect(() => {
+                Extension.isLikeFile(uri).then((isFile) => {
+                    if (isFile) {
+                        target.upload(uri);
+                    } else {
+                        vscode.workspace.findFiles(vscode.workspace.asRelativePath(uri) + "/**/*").then((files) => {
+                            files.forEach((uri) => {
+                                target.upload(uri);
+                            });
+                        });
+                    }
                 });
-            }
+            });
         });
     });
     fileWatcher.onDidDelete((uri) => {
@@ -169,21 +299,26 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
         if (Extension.isUriIgnored(uri)) {
+            Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
             return;
         }
 
-        Extension.isLikeFile(uri).then(
-            (isFile) => {
-                if (isFile) {
-                    Targets.delete(uri);
-                } else {
-                    Targets.deleteDir(uri);
-                }
-            },
-            (reason) => {
-                Extension.appendLineToOutputChannel("[ERROR] " + reason);
-            }
-        );
+        Targets.getActive().forEach((target) => {
+            target.connect(() => {
+                Extension.isLikeFile(uri).then(
+                    (isFile) => {
+                        if (isFile) {
+                            target.delete(uri);
+                        } else {
+                            target.deleteDir(uri);
+                        }
+                    },
+                    (reason) => {
+                        Extension.appendLineToOutputChannel("[ERROR] " + reason);
+                    }
+                );
+            });
+        });
     });
 
     context.subscriptions.push(fileWatcher);
@@ -200,7 +335,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.cancel-all-uploads", () => {
             Targets.getItems().forEach((item) => {
-                item.getQueue().end().removeAllPendingTasks();
+                item.getQueue().end();
             });
         })
     );
@@ -229,17 +364,21 @@ export function activate(context: vscode.ExtensionContext) {
 
                 const target = Targets.findByName(value);
 
-                thisArg.forEach((uri) => {
-                    Extension.isLikeFile(uri).then((isFile) => {
-                        if (isFile) {
-                            target.upload(uri);
-                        } else {
-                            vscode.workspace.findFiles(vscode.workspace.asRelativePath(uri) + "/**/*").then((files) => {
-                                files.forEach((uri) => {
-                                    target.upload(uri);
-                                });
-                            });
-                        }
+                target.connect(() => {
+                    thisArg.forEach((uri) => {
+                        Extension.isLikeFile(uri).then((isFile) => {
+                            if (isFile) {
+                                target.upload(uri);
+                            } else {
+                                vscode.workspace
+                                    .findFiles(vscode.workspace.asRelativePath(uri) + "/**/*")
+                                    .then((files) => {
+                                        files.forEach((uri) => {
+                                            target.upload(uri);
+                                        });
+                                    });
+                            }
+                        });
                     });
                 });
             });
@@ -260,17 +399,23 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            thisArg.forEach((uri) => {
-                Extension.isLikeFile(uri).then((isFile) => {
-                    if (isFile) {
-                        Targets.upload(uri);
-                    } else {
-                        vscode.workspace.findFiles(vscode.workspace.asRelativePath(uri) + "/**/*").then((files) => {
-                            files.forEach((uri) => {
-                                Targets.upload(uri);
-                            });
+            Targets.getActive().forEach((target) => {
+                target.connect(() => {
+                    thisArg.forEach((uri) => {
+                        Extension.isLikeFile(uri).then((isFile) => {
+                            if (isFile) {
+                                target.upload(uri);
+                            } else {
+                                vscode.workspace
+                                    .findFiles(vscode.workspace.asRelativePath(uri) + "/**/*")
+                                    .then((files) => {
+                                        files.forEach((uri) => {
+                                            target.upload(uri);
+                                        });
+                                    });
+                            }
                         });
-                    }
+                    });
                 });
             });
         })
@@ -296,8 +441,11 @@ export function activate(context: vscode.ExtensionContext) {
                     return;
                 }
                 const target = Targets.findByName(value);
-                files.forEach((textDocument) => {
-                    target.upload(textDocument.uri);
+
+                target.connect(() => {
+                    files.forEach((textDocument) => {
+                        target.upload(textDocument.uri);
+                    });
                 });
             });
         })

@@ -28,7 +28,7 @@ export interface TargetOptionsInterface {
 }
 
 export interface TargetInterface {
-    connect(cb: Function, error: Function): void;
+    connect(cb: Function, error?: Function | undefined): void;
     upload(uri: vscode.Uri): Promise<vscode.Uri>;
     delete(uri: vscode.Uri): Promise<vscode.Uri>;
     deleteDir(uri: vscode.Uri): Promise<vscode.Uri>;

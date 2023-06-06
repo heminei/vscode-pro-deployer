@@ -12,54 +12,6 @@ export class Targets {
         this.items.push(target);
     }
 
-    public static upload(uri: vscode.Uri): Promise<vscode.Uri[]> {
-        let promises: Promise<vscode.Uri>[] = [];
-        Targets.getActive().forEach((target) => {
-            let promise = target.upload(uri);
-            promise.catch((error) => {
-                Extension.showErrorMessage(
-                    target.getName() + " => Can't upload file: " + uri.path + ". Details: " + error
-                );
-            });
-            promises.push(promise);
-        });
-
-        const promise = Promise.all(promises);
-        return promise;
-    }
-
-    public static delete(uri: vscode.Uri): Promise<vscode.Uri[]> {
-        let promises: Promise<vscode.Uri>[] = [];
-        Targets.getActive().forEach((target) => {
-            let promise = target.delete(uri);
-            promise.catch((error) => {
-                Extension.showErrorMessage(
-                    target.getName() + " => Can't delete file: " + uri.path + ". Details: " + error
-                );
-            });
-            promises.push(promise);
-        });
-
-        const promise = Promise.all(promises);
-        return promise;
-    }
-
-    public static deleteDir(uri: vscode.Uri): Promise<vscode.Uri[]> {
-        let promises: Promise<vscode.Uri>[] = [];
-        Targets.getActive().forEach((target) => {
-            let promise = target.deleteDir(uri);
-            promise.catch((error) => {
-                Extension.showErrorMessage(
-                    target.getName() + " => Can't delete dir: " + uri.path + ". Details: " + error
-                );
-            });
-            promises.push(promise);
-        });
-
-        const promise = Promise.all(promises);
-        return promise;
-    }
-
     public static destroyAllTargets() {
         Targets.items.forEach((target) => {
             target.destroy();

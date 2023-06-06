@@ -46,7 +46,7 @@ export class FTP extends EventEmitter implements TargetInterface {
         Extension.appendLineToOutputChannel("[INFO][FTP] target is created");
     }
 
-    connect(cb: Function, errorCb: Function): void {
+    connect(cb: Function, errorCb: Function | undefined = undefined): void {
         if (this.isConnected) {
             cb();
             return;
@@ -56,7 +56,9 @@ export class FTP extends EventEmitter implements TargetInterface {
             if (this.options.transferDataType === "ascii") {
                 this.client.ascii((err) => {
                     if (err) {
-                        errorCb(err);
+                        if (errorCb) {
+                            errorCb(err);
+                        }
                         return;
                     }
                     cb();
@@ -69,7 +71,9 @@ export class FTP extends EventEmitter implements TargetInterface {
             }
         });
         this.once("error", (error) => {
-            errorCb(error);
+            if (errorCb) {
+                errorCb(error);
+            }
         });
 
         if (this.isConnecting === true) {
@@ -108,220 +112,133 @@ export class FTP extends EventEmitter implements TargetInterface {
                 rejectUnauthorized: false,
             },
         });
-
-        this.queue.on("start", () => {
-            if (Configs.getConfigs().enableStatusBarItem) {
-                let hasErrors = false;
-                this.queue.on("start", () => {
-                    Extension.statusBarItem!.text = "$(sync~spin) PRO Deployer: Uploading...";
-                });
-                this.queue.on("end", () => {
-                    if (hasErrors) {
-                        Extension.statusBarItem!.text = "$(extensions-warning-message) PRO Deployer";
-                        Extension.statusBarItem!.tooltip = "Has some errors, click to see the output channel";
-                    } else {
-                        Extension.statusBarItem!.text = "$(sync) PRO Deployer";
-                        Extension.statusBarItem!.tooltip = "";
-                    }
-                });
-                this.queue.on("task.success", (job: QueueTask) => {
-                    Extension.statusBarItem!.tooltip =
-                        job.action[0].toUpperCase() +
-                        job.action.slice(1) +
-                        " (" +
-                        (this.queue.getPendingTasks().length + 1) +
-                        " pending) => " +
-                        vscode.workspace.asRelativePath(job.uri);
-                });
-                this.queue.on("task.error", (job: QueueTask) => {
-                    hasErrors = true;
-                });
-            }
-            if (Configs.getConfigs().enableQuickPick) {
-                vscode.window.withProgress(
-                    {
-                        location: vscode.ProgressLocation.Notification,
-                        title: this.name,
-                        cancellable: true,
-                    },
-                    (progress, token) => {
-                        token.onCancellationRequested(() => {
-                            this.queue.end();
-                        });
-                        return new Promise<boolean>((resolve, reject) => {
-                            const onStartCallback = (job: QueueTask) => {
-                                progress.report({
-                                    message:
-                                        job.action[0].toUpperCase() +
-                                        job.action.slice(1) +
-                                        " (" +
-                                        (this.queue.getPendingTasks().length + 1) +
-                                        " pending) => " +
-                                        vscode.workspace.asRelativePath(job.uri),
-                                });
-                            };
-                            const onErrorCallback = (job: QueueTask) => {
-                                progress.report({
-                                    message:
-                                        job.action[0].toUpperCase() +
-                                        job.action.slice(1) +
-                                        " (" +
-                                        (this.queue.getPendingTasks().length + 1) +
-                                        " pending) => " +
-                                        vscode.workspace.asRelativePath(job.uri),
-                                });
-                            };
-                            this.queue.on("task.success", onStartCallback);
-                            this.queue.on("task.error", onErrorCallback);
-                            this.queue.once("end", () => {
-                                this.queue.off("task.success", onStartCallback);
-                                this.queue.off("task.error", onErrorCallback);
-                                setTimeout(() => {
-                                    resolve(true);
-                                }, 500);
-                            });
-                        });
-                    }
-                );
-            }
-        });
     }
     upload(uri: vscode.Uri, attempts = 1): Promise<vscode.Uri> {
         const relativePath = vscode.workspace.asRelativePath(uri);
 
         return new Promise<vscode.Uri>((resolve, reject) => {
-            this.connect(
-                () => {
-                    const job = <QueueTask>((cb) => {
-                        Extension.appendLineToOutputChannel("[INFO][FTP] Start uploading file: " + relativePath);
-                        this.client.put(uri.fsPath, this.options.dir + "/" + relativePath, (err) => {
-                            if (err) {
-                                if (err.message.indexOf("No such file") !== -1) {
-                                    const dir = this.options.dir + "/" + path.dirname(relativePath);
-                                    Extension.appendLineToOutputChannel("[INFO][FTP] Missing directory: " + dir);
-                                    this.mkdir(dir).then(
-                                        () => {
-                                            Extension.appendLineToOutputChannel(
-                                                "[INFO][FTP] The directory is created: " + dir + "."
-                                            );
-                                            this.client.put(
-                                                uri.fsPath,
-                                                this.options.dir + "/" + relativePath,
-                                                (err) => {
-                                                    if (err) {
-                                                        cb(err);
-                                                        reject(err);
-                                                        return;
-                                                    }
-                                                    cb();
-                                                    resolve(uri);
-                                                }
-                                            );
-                                        },
-                                        (reason) => {
-                                            cb(reason);
-                                            reject(reason);
-                                        }
+            if (!this.isConnected) {
+                reject("Not connected");
+                return;
+            }
+
+            const job = <QueueTask>((cb) => {
+                Extension.appendLineToOutputChannel("[INFO][FTP] Start uploading file: " + relativePath);
+                this.client.put(uri.fsPath, this.options.dir + "/" + relativePath, (err) => {
+                    if (err) {
+                        if (err.message.indexOf("No such file") !== -1) {
+                            const dir = this.options.dir + "/" + path.dirname(relativePath);
+                            Extension.appendLineToOutputChannel("[INFO][FTP] Missing directory: " + dir);
+                            this.mkdir(dir).then(
+                                () => {
+                                    Extension.appendLineToOutputChannel(
+                                        "[INFO][FTP] The directory is created: " + dir + "."
                                     );
-                                    return;
+                                    this.client.put(uri.fsPath, this.options.dir + "/" + relativePath, (err) => {
+                                        if (err) {
+                                            cb(err);
+                                            reject(err);
+                                            return;
+                                        }
+                                        cb();
+                                        resolve(uri);
+                                    });
+                                },
+                                (reason) => {
+                                    cb(reason);
+                                    reject(reason);
                                 }
-                                // if (err.message.indexOf("read ECONNRESET") !== -1 && attempts < 3) {
-                                //     this.upload(uri, attempts + 1).then(
-                                //         (value) => {
-                                //             resolve(value);
-                                //         },
-                                //         (reason) => {
-                                //             reject(reason);
-                                //         }
-                                //     );
-                                //     return;
-                                // }
-                                Extension.appendLineToOutputChannel(
-                                    "[ERROR][FTP] Can't upload file: " + uri.path + ". Error: " + err.message
-                                );
-                                cb(err.message);
-                                reject(err.message);
-                                return;
-                            }
-                            Extension.appendLineToOutputChannel(
-                                "[INFO][FTP] File: '" +
-                                    relativePath +
-                                    "' is uploaded to: '" +
-                                    this.options.dir +
-                                    "/" +
-                                    relativePath +
-                                    "'"
                             );
-                            cb();
-                            resolve(uri);
-                        });
-                    });
-                    job.uri = uri;
-                    job.isFile = true;
-                    job.action = "upload";
-                    this.queue.push(job);
-                },
-                (err: any) => {
-                    reject(err);
-                }
-            );
+                            return;
+                        }
+                        // if (err.message.indexOf("read ECONNRESET") !== -1 && attempts < 3) {
+                        //     this.upload(uri, attempts + 1).then(
+                        //         (value) => {
+                        //             resolve(value);
+                        //         },
+                        //         (reason) => {
+                        //             reject(reason);
+                        //         }
+                        //     );
+                        //     return;
+                        // }
+                        Extension.appendLineToOutputChannel(
+                            "[ERROR][FTP] Can't upload file: " + uri.path + ". Error: " + err.message
+                        );
+                        cb(err.message);
+                        reject(err.message);
+                        return;
+                    }
+                    Extension.appendLineToOutputChannel(
+                        "[INFO][FTP] File: '" +
+                            relativePath +
+                            "' is uploaded to: '" +
+                            this.options.dir +
+                            "/" +
+                            relativePath +
+                            "'"
+                    );
+                    cb();
+                    resolve(uri);
+                });
+            });
+            job.uri = uri;
+            job.isFile = true;
+            job.action = "upload";
+            this.queue.push(job);
         });
     }
     delete(uri: vscode.Uri): Promise<vscode.Uri> {
         const relativePath = vscode.workspace.asRelativePath(uri);
 
         return new Promise<vscode.Uri>((resolve, reject) => {
-            this.connect(
-                () => {
-                    const job = <QueueTask>((cb) => {
-                        this.client.delete(this.options.dir + "/" + relativePath, (err) => {
-                            if (err) {
-                                cb(err);
-                                reject(err);
-                                return;
-                            }
-                            Extension.appendLineToOutputChannel("[INFO][SFTP] File deleted: '" + relativePath);
-                            cb();
-                            resolve(uri);
-                        });
-                    });
-                    job.uri = uri;
-                    job.isFile = true;
-                    job.action = "delete";
-                    this.queue.push(job);
-                },
-                (err: any) => {
-                    reject(err);
-                }
-            );
+            if (!this.isConnected) {
+                reject("Not connected");
+                return;
+            }
+
+            const job = <QueueTask>((cb) => {
+                this.client.delete(this.options.dir + "/" + relativePath, (err) => {
+                    if (err) {
+                        cb(err);
+                        reject(err);
+                        return;
+                    }
+                    Extension.appendLineToOutputChannel("[INFO][SFTP] File deleted: '" + relativePath);
+                    cb();
+                    resolve(uri);
+                });
+            });
+            job.uri = uri;
+            job.isFile = true;
+            job.action = "delete";
+            this.queue.push(job);
         });
     }
     deleteDir(uri: vscode.Uri): Promise<vscode.Uri> {
         const relativePath = vscode.workspace.asRelativePath(uri);
 
         return new Promise<vscode.Uri>((resolve, reject) => {
-            this.connect(
-                () => {
-                    const job = <QueueTask>((cb) => {
-                        this.client.rmdir(this.options.dir + "/" + relativePath, (err) => {
-                            if (err) {
-                                cb(err.message);
-                                reject(err.message);
-                                return;
-                            }
-                            cb();
-                            resolve(uri);
-                        });
-                    });
-                    job.uri = uri;
-                    job.action = "delete";
-                    job.isFile = false;
-                    this.queue.push(job);
-                },
-                (err: any) => {
-                    reject(err);
-                }
-            );
+            if (!this.isConnected) {
+                reject("Not connected");
+                return;
+            }
+
+            const job = <QueueTask>((cb) => {
+                this.client.rmdir(this.options.dir + "/" + relativePath, (err) => {
+                    if (err) {
+                        cb(err.message);
+                        reject(err.message);
+                        return;
+                    }
+                    cb();
+                    resolve(uri);
+                });
+            });
+            job.uri = uri;
+            job.action = "delete";
+            job.isFile = false;
+            this.queue.push(job);
         });
     }
     mkdir(dir: string): Promise<string> {

@@ -43,7 +43,7 @@ export class SFTP extends EventEmitter implements TargetInterface {
         Extension.appendLineToOutputChannel("[INFO][SFTP] target is created");
     }
 
-    connect(cb: Function, errorCb: Function): void {
+    connect(cb: Function, errorCb: Function | undefined = undefined): void {
         if (this.isConnected) {
             cb();
             return;
@@ -54,7 +54,10 @@ export class SFTP extends EventEmitter implements TargetInterface {
             Extension.appendLineToOutputChannel("[INFO][SFTP] Connected successfully to: " + this.options.host);
         });
         this.once("error", (error) => {
-            errorCb(error);
+            Extension.showErrorMessage("Can't connect to " + this.getName() + ": " + error);
+            if (errorCb) {
+                errorCb(error);
+            }
         });
 
         if (this.isConnecting === true) {
@@ -79,7 +82,6 @@ export class SFTP extends EventEmitter implements TargetInterface {
             this.isConnected = false;
             this.isConnecting = false;
             this.emit("error", error);
-            errorCb(error);
         });
 
         if (!this.options.port) {
@@ -103,246 +105,151 @@ export class SFTP extends EventEmitter implements TargetInterface {
             privateKey: privateKey,
             passphrase: this.options.passphrase,
         });
-
-        if (Configs.getConfigs().enableStatusBarItem) {
-            let hasErrors = false;
-            let statusBarCheckTimer: NodeJS.Timeout | undefined = undefined;
-            this.queue.on("start", () => {
-                Extension.statusBarItem!.text = "$(sync~spin) PRO Deployer: Uploading...";
-                statusBarCheckTimer = setInterval(() => {
-                    Extension.statusBarItem!.text =
-                        "$(sync~spin) PRO Deployer: Uploading (" + (this.queue.getPendingTasks().length + 1) + ")...";
-                }, 1000);
-            });
-            this.queue.on("end", () => {
-                if (hasErrors) {
-                    Extension.statusBarItem!.text = "$(extensions-warning-message) PRO Deployer";
-                    Extension.statusBarItem!.tooltip = "Has some errors, click to see the output channel";
-                } else {
-                    Extension.statusBarItem!.text = "$(sync) PRO Deployer";
-                    Extension.statusBarItem!.tooltip = "";
-                }
-                if (statusBarCheckTimer) {
-                    clearInterval(statusBarCheckTimer);
-                }
-            });
-            this.queue.on("task.success", (job: QueueTask) => {
-                Extension.statusBarItem!.tooltip =
-                    job.action[0].toUpperCase() +
-                    job.action.slice(1) +
-                    " (" +
-                    (this.queue.getPendingTasks().length + 1) +
-                    " pending) => " +
-                    vscode.workspace.asRelativePath(job.uri);
-            });
-            this.queue.on("task.error", (job: QueueTask) => {
-                hasErrors = true;
-            });
-        }
-
-        if (Configs.getConfigs().enableQuickPick) {
-            this.queue.on("start", () => {
-                vscode.window.withProgress(
-                    {
-                        location: vscode.ProgressLocation.Notification,
-                        title: this.name,
-                        cancellable: true,
-                    },
-                    (progress, token) => {
-                        token.onCancellationRequested(() => {
-                            this.queue.end();
-                        });
-                        return new Promise<boolean>((resolve, reject) => {
-                            const onStartCallback = (job: QueueTask) => {
-                                progress.report({
-                                    message:
-                                        job.action[0].toUpperCase() +
-                                        job.action.slice(1) +
-                                        " (" +
-                                        (this.queue.getPendingTasks().length + 1) +
-                                        " pending) => " +
-                                        vscode.workspace.asRelativePath(job.uri),
-                                });
-                            };
-                            const onErrorCallback = (job: QueueTask) => {
-                                progress.report({
-                                    message:
-                                        job.action[0].toUpperCase() +
-                                        job.action.slice(1) +
-                                        " (" +
-                                        (this.queue.getPendingTasks().length + 1) +
-                                        " pending) => " +
-                                        vscode.workspace.asRelativePath(job.uri),
-                                });
-                            };
-                            this.queue.on("task.success", onStartCallback);
-                            this.queue.on("task.error", onErrorCallback);
-                            this.queue.once("end", () => {
-                                this.queue.off("task.success", onStartCallback);
-                                this.queue.off("task.error", onErrorCallback);
-                                setTimeout(() => {
-                                    resolve(true);
-                                }, 500);
-                            });
-                        });
-                    }
-                );
-            });
-        }
     }
     upload(uri: vscode.Uri): Promise<vscode.Uri> {
         const relativePath = vscode.workspace.asRelativePath(uri);
         return new Promise<vscode.Uri>((resolve, reject) => {
-            this.connect(
-                () => {
-                    const job = <QueueTask>((cb) => {
-                        if (!this.sftp) {
-                            Extension.appendLineToOutputChannel("[ERROR][SFTP] SFTP client missing");
-                            reject("SFTP client missing");
-                            return;
-                        }
-                        Extension.appendLineToOutputChannel("[INFO][SFTP] Start uploading file: " + relativePath);
-                        this.sftp.fastPut(uri.fsPath, this.options.dir + "/" + relativePath, (err: any) => {
-                            if (err) {
-                                if (err.message.indexOf("No such file") !== -1) {
-                                    const dir = this.options.dir + "/" + path.dirname(relativePath);
+            if (!this.isConnected) {
+                reject("Not connected");
+                return;
+            }
 
-                                    Extension.appendLineToOutputChannel("[INFO][SFTP] Missing directory: " + dir);
-                                    this.mkdir(dir).then(
-                                        () => {
-                                            Extension.appendLineToOutputChannel(
-                                                "[INFO][SFTP] The directory is created: " + dir + "."
-                                            );
-                                            this.sftp?.fastPut(
-                                                uri.fsPath,
-                                                this.options.dir + "/" + relativePath,
-                                                (err: any) => {
-                                                    if (err) {
-                                                        cb(err);
-                                                        reject(err);
-                                                        return;
-                                                    }
-                                                    cb();
-                                                    resolve(uri);
-                                                }
-                                            );
-                                        },
-                                        (reason: Error) => {
-                                            cb(reason);
-                                            reject(reason);
+            const job = <QueueTask>((cb) => {
+                if (!this.sftp) {
+                    Extension.appendLineToOutputChannel("[ERROR][SFTP] SFTP client missing");
+                    reject("SFTP client missing");
+                    return;
+                }
+                Extension.appendLineToOutputChannel("[INFO][SFTP] Start uploading file: " + relativePath);
+                this.sftp.fastPut(uri.fsPath, this.options.dir + "/" + relativePath, (err: any) => {
+                    if (err) {
+                        if (err.message.indexOf("No such file") !== -1) {
+                            const dir = this.options.dir + "/" + path.dirname(relativePath);
+
+                            Extension.appendLineToOutputChannel("[INFO][SFTP] Missing directory: " + dir);
+                            this.mkdir(dir).then(
+                                () => {
+                                    Extension.appendLineToOutputChannel(
+                                        "[INFO][SFTP] The directory is created: " + dir + "."
+                                    );
+                                    this.sftp?.fastPut(
+                                        uri.fsPath,
+                                        this.options.dir + "/" + relativePath,
+                                        (err: any) => {
+                                            if (err) {
+                                                cb(err);
+                                                reject(err);
+                                                return;
+                                            }
+                                            cb();
+                                            resolve(uri);
                                         }
                                     );
-                                    return;
+                                },
+                                (reason: Error) => {
+                                    cb(reason);
+                                    reject(reason);
                                 }
-
-                                Extension.appendLineToOutputChannel(
-                                    "[ERROR][SFTP] Can't upload file: " + uri.path + ". Error: " + err.message
-                                );
-                                cb(err.message);
-                                reject(err.message);
-                                return;
-                            }
-                            Extension.appendLineToOutputChannel(
-                                "[INFO][SFTP] File: '" +
-                                    relativePath +
-                                    "' is uploaded to: '" +
-                                    this.options.dir +
-                                    "/" +
-                                    relativePath +
-                                    "'"
                             );
-                            cb();
-                            resolve(uri);
-                        });
-                    });
-                    job.uri = uri;
-                    job.isFile = true;
-                    job.action = "upload";
-                    this.queue.push(job);
-                },
-                (err: any) => {
-                    reject(err);
-                }
-            );
+                            return;
+                        }
+
+                        Extension.appendLineToOutputChannel(
+                            "[ERROR][SFTP] Can't upload file: " + uri.path + ". Error: " + err.message
+                        );
+                        cb(err.message);
+                        reject(err.message);
+                        return;
+                    }
+                    Extension.appendLineToOutputChannel(
+                        "[INFO][SFTP] File: '" +
+                            relativePath +
+                            "' is uploaded to: '" +
+                            this.options.dir +
+                            "/" +
+                            relativePath +
+                            "'"
+                    );
+                    cb();
+                    resolve(uri);
+                });
+            });
+            job.uri = uri;
+            job.isFile = true;
+            job.action = "upload";
+            this.queue.push(job);
         });
     }
     delete(uri: vscode.Uri): Promise<vscode.Uri> {
         const relativePath = vscode.workspace.asRelativePath(uri);
 
         return new Promise<vscode.Uri>((resolve, reject) => {
-            this.connect(
-                () => {
-                    const job = <QueueTask>((cb) => {
-                        if (!this.sftp) {
-                            Extension.appendLineToOutputChannel("[ERROR][SFTP] SFTP client missing");
-                            return;
-                        }
-                        this.sftp.unlink(this.options.dir + "/" + relativePath, (err) => {
-                            if (err) {
-                                if (err.message.indexOf("No such file") !== -1) {
-                                    Extension.appendLineToOutputChannel(
-                                        "[INFO][SFTP] File deleted (No such file): '" +
-                                            this.options.dir +
-                                            "/" +
-                                            relativePath
-                                    );
-                                    cb();
-                                    resolve(uri);
-                                    return;
-                                }
-                                cb(err);
-                                reject(err);
-                                return;
-                            }
-                            Extension.appendLineToOutputChannel("[INFO][SFTP] File deleted: '" + relativePath);
+            if (!this.isConnected) {
+                reject("Not connected");
+                return;
+            }
+
+            const job = <QueueTask>((cb) => {
+                if (!this.sftp) {
+                    Extension.appendLineToOutputChannel("[ERROR][SFTP] SFTP client missing");
+                    return;
+                }
+                this.sftp.unlink(this.options.dir + "/" + relativePath, (err) => {
+                    if (err) {
+                        if (err.message.indexOf("No such file") !== -1) {
+                            Extension.appendLineToOutputChannel(
+                                "[INFO][SFTP] File deleted (No such file): '" + this.options.dir + "/" + relativePath
+                            );
                             cb();
                             resolve(uri);
-                        });
-                    });
-                    job.uri = uri;
-                    job.isFile = true;
-                    job.action = "delete";
-                    this.queue.push(job);
-                },
-                (err: any) => {
-                    reject(err);
-                }
-            );
+                            return;
+                        }
+                        cb(err);
+                        reject(err);
+                        return;
+                    }
+                    Extension.appendLineToOutputChannel("[INFO][SFTP] File deleted: '" + relativePath);
+                    cb();
+                    resolve(uri);
+                });
+            });
+            job.uri = uri;
+            job.isFile = true;
+            job.action = "delete";
+            this.queue.push(job);
         });
     }
     deleteDir(uri: vscode.Uri): Promise<vscode.Uri> {
         const relativePath = vscode.workspace.asRelativePath(uri);
 
         return new Promise<vscode.Uri>((resolve, reject) => {
-            this.connect(
-                () => {
-                    const job = <QueueTask>((cb) => {
-                        const dir = this.options.dir + "/" + relativePath;
-                        if (dir === "/") {
-                            cb("Can't delete '/' (root dir)");
-                            reject("Can't delete '/' (root dir)");
-                            return;
-                        }
-                        Extension.appendLineToOutputChannel("[INFO][SFTP] Start deleting dir: " + dir);
-                        this.client.exec("rm -rf " + dir, (err, channel) => {
-                            if (err) {
-                                cb(err.message);
-                                reject(err.message);
-                                return;
-                            }
-                            cb();
-                            resolve(uri);
-                        });
-                    });
-                    job.uri = uri;
-                    job.action = "delete";
-                    job.isFile = false;
-                    this.queue.push(job);
-                },
-                (err: any) => {
-                    reject(err);
+            if (!this.isConnected) {
+                reject("Not connected");
+                return;
+            }
+
+            const job = <QueueTask>((cb) => {
+                const dir = this.options.dir + "/" + relativePath;
+                if (dir === "/") {
+                    cb("Can't delete '/' (root dir)");
+                    reject("Can't delete '/' (root dir)");
+                    return;
                 }
-            );
+                Extension.appendLineToOutputChannel("[INFO][SFTP] Start deleting dir: " + dir);
+                this.client.exec("rm -rf " + dir, (err, channel) => {
+                    if (err) {
+                        cb(err.message);
+                        reject(err.message);
+                        return;
+                    }
+                    cb();
+                    resolve(uri);
+                });
+            });
+            job.uri = uri;
+            job.action = "delete";
+            job.isFile = false;
+            this.queue.push(job);
         });
     }
     mkdir(dir: string): Promise<string> {
