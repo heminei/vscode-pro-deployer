@@ -87,6 +87,9 @@ export class SFTP extends EventEmitter implements TargetInterface {
         if (!this.options.port) {
             this.options.port = 22;
         }
+        if (this.options.dir[this.options.dir.length - 1] !== "/") {
+            this.options.dir += "/";
+        }
 
         let privateKey = undefined;
         try {
@@ -121,10 +124,10 @@ export class SFTP extends EventEmitter implements TargetInterface {
                     return;
                 }
                 Extension.appendLineToOutputChannel("[INFO][SFTP] Start uploading file: " + relativePath);
-                this.sftp.fastPut(uri.fsPath, this.options.dir + "/" + relativePath, (err: any) => {
+                this.sftp.fastPut(uri.fsPath, this.options.dir + relativePath, (err: any) => {
                     if (err) {
                         if (err.message.indexOf("No such file") !== -1) {
-                            const dir = this.options.dir + "/" + path.dirname(relativePath);
+                            const dir = this.options.dir + path.dirname(relativePath);
 
                             Extension.appendLineToOutputChannel("[INFO][SFTP] Missing directory: " + dir);
                             this.mkdir(dir).then(
@@ -132,19 +135,15 @@ export class SFTP extends EventEmitter implements TargetInterface {
                                     Extension.appendLineToOutputChannel(
                                         "[INFO][SFTP] The directory is created: " + dir + "."
                                     );
-                                    this.sftp?.fastPut(
-                                        uri.fsPath,
-                                        this.options.dir + "/" + relativePath,
-                                        (err: any) => {
-                                            if (err) {
-                                                cb(err);
-                                                reject(err);
-                                                return;
-                                            }
-                                            cb();
-                                            resolve(uri);
+                                    this.sftp?.fastPut(uri.fsPath, this.options.dir + relativePath, (err: any) => {
+                                        if (err) {
+                                            cb(err);
+                                            reject(err);
+                                            return;
                                         }
-                                    );
+                                        cb();
+                                        resolve(uri);
+                                    });
                                 },
                                 (reason: Error) => {
                                     cb(reason);
@@ -166,7 +165,6 @@ export class SFTP extends EventEmitter implements TargetInterface {
                             relativePath +
                             "' is uploaded to: '" +
                             this.options.dir +
-                            "/" +
                             relativePath +
                             "'"
                     );
@@ -194,11 +192,11 @@ export class SFTP extends EventEmitter implements TargetInterface {
                     Extension.appendLineToOutputChannel("[ERROR][SFTP] SFTP client missing");
                     return;
                 }
-                this.sftp.unlink(this.options.dir + "/" + relativePath, (err) => {
+                this.sftp.unlink(this.options.dir + relativePath, (err) => {
                     if (err) {
                         if (err.message.indexOf("No such file") !== -1) {
                             Extension.appendLineToOutputChannel(
-                                "[INFO][SFTP] File deleted (No such file): '" + this.options.dir + "/" + relativePath
+                                "[INFO][SFTP] File deleted (No such file): '" + this.options.dir + relativePath
                             );
                             cb();
                             resolve(uri);
@@ -229,7 +227,7 @@ export class SFTP extends EventEmitter implements TargetInterface {
             }
 
             const job = <QueueTask>((cb) => {
-                const dir = this.options.dir + "/" + relativePath;
+                const dir = this.options.dir + relativePath;
                 if (dir === "/") {
                     cb("Can't delete '/' (root dir)");
                     reject("Can't delete '/' (root dir)");

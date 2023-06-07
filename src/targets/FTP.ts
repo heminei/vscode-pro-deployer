@@ -95,6 +95,9 @@ export class FTP extends EventEmitter implements TargetInterface {
         if (!this.options.port) {
             this.options.port = 21;
         }
+        if (this.options.dir[this.options.dir.length - 1] !== "/") {
+            this.options.dir += "/";
+        }
         if (!this.options.transferDataType) {
             this.options.transferDataType = "binary";
         }
@@ -124,17 +127,21 @@ export class FTP extends EventEmitter implements TargetInterface {
 
             const job = <QueueTask>((cb) => {
                 Extension.appendLineToOutputChannel("[INFO][FTP] Start uploading file: " + relativePath);
-                this.client.put(uri.fsPath, this.options.dir + "/" + relativePath, (err) => {
+                this.client.put(uri.fsPath, this.options.dir + relativePath, (err) => {
                     if (err) {
-                        if (err.message.indexOf("No such file") !== -1) {
-                            const dir = this.options.dir + "/" + path.dirname(relativePath);
+                        console.log("err", err);
+                        if (
+                            err.message.indexOf("No such file") !== -1 ||
+                            err.message.indexOf("Couldn't open the file or directory") !== -1
+                        ) {
+                            const dir = this.options.dir + path.dirname(relativePath);
                             Extension.appendLineToOutputChannel("[INFO][FTP] Missing directory: " + dir);
                             this.mkdir(dir).then(
                                 () => {
                                     Extension.appendLineToOutputChannel(
                                         "[INFO][FTP] The directory is created: " + dir + "."
                                     );
-                                    this.client.put(uri.fsPath, this.options.dir + "/" + relativePath, (err) => {
+                                    this.client.put(uri.fsPath, this.options.dir + relativePath, (err) => {
                                         if (err) {
                                             cb(err);
                                             reject(err);
@@ -174,7 +181,6 @@ export class FTP extends EventEmitter implements TargetInterface {
                             relativePath +
                             "' is uploaded to: '" +
                             this.options.dir +
-                            "/" +
                             relativePath +
                             "'"
                     );
@@ -198,7 +204,7 @@ export class FTP extends EventEmitter implements TargetInterface {
             }
 
             const job = <QueueTask>((cb) => {
-                this.client.delete(this.options.dir + "/" + relativePath, (err) => {
+                this.client.delete(this.options.dir + relativePath, (err) => {
                     if (err) {
                         cb(err);
                         reject(err);
@@ -225,7 +231,7 @@ export class FTP extends EventEmitter implements TargetInterface {
             }
 
             const job = <QueueTask>((cb) => {
-                this.client.rmdir(this.options.dir + "/" + relativePath, (err) => {
+                this.client.rmdir(this.options.dir + relativePath, (err) => {
                     if (err) {
                         cb(err.message);
                         reject(err.message);
