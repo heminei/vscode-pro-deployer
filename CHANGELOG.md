@@ -4,6 +4,13 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [2.2.0]
+
+- fixed auto update configurations on Windows
+- fixed freeze when show multiple error messages
+- performance optimizations
+- UX optimizations
+
 ## [2.1.0]
 
 - performance optimizations

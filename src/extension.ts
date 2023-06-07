@@ -11,6 +11,7 @@ export class Extension {
     public static extensionContext: vscode.ExtensionContext;
     public static outputChannel: vscode.OutputChannel | null;
     public static statusBarItem: vscode.StatusBarItem | null;
+    private static lastErrorMessageTime: number = 0;
 
     public static init() {
         Extension.outputChannel = vscode.window.createOutputChannel("PRO Deployer");
@@ -27,6 +28,10 @@ export class Extension {
         return null;
     }
 
+    public static getLastErrorMessageTime() {
+        return Extension.lastErrorMessageTime;
+    }
+
     public static appendLineToOutputChannel(string: string) {
         const date = new Date();
         if (Extension.outputChannel) {
@@ -36,7 +41,12 @@ export class Extension {
 
     public static showErrorMessage(string: string) {
         Extension.appendLineToOutputChannel("[ERROR][showErrorMessage] " + string);
-        return vscode.window.showErrorMessage("[PRO Deployer] " + string);
+        Extension.lastErrorMessageTime = Date.now();
+        return vscode.window.showErrorMessage("[PRO Deployer] " + string, "Show output channel").then((value) => {
+            if (value === "Show output channel") {
+                vscode.commands.executeCommand("pro-deployer.show-output-channel");
+            }
+        });
     }
 
     public static isLikeFile(uri: vscode.Uri): Promise<boolean> {
@@ -67,15 +77,17 @@ export class Extension {
 
     public static isUriIgnored(uri: vscode.Uri): boolean {
         if (uri.scheme === "git") {
-            Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
+            Extension.appendLineToOutputChannel("File ignored (git): " + vscode.workspace.asRelativePath(uri.path));
             return true;
         }
         if (uri.path === Configs.getConfigFile().path) {
-            Extension.appendLineToOutputChannel("SKIP config file");
+            Extension.appendLineToOutputChannel("File ignored (config file)");
             return true;
         }
         if (micromatch.isMatch(vscode.workspace.asRelativePath(uri.path), Configs.getConfigs().ignore)) {
-            Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
+            Extension.appendLineToOutputChannel(
+                "File ignored (ignore option): " + vscode.workspace.asRelativePath(uri.path)
+            );
             return true;
         }
         if (Configs.getConfigs().checkGitignore) {
@@ -86,7 +98,7 @@ export class Extension {
                         .denies(vscode.workspace.asRelativePath(uri.path))
                 ) {
                     Extension.appendLineToOutputChannel(
-                        "File ignored by .gitignore: " + vscode.workspace.asRelativePath(uri.path)
+                        "File ignored (.gitignore): " + vscode.workspace.asRelativePath(uri.path)
                     );
                     return true;
                 }
@@ -200,6 +212,7 @@ export function activate(context: vscode.ExtensionContext) {
                     if (allPendingTasks === 0) {
                         Extension.statusBarItem!.text = "$(sync) PRO Deployer";
                         Extension.statusBarItem!.tooltip = "";
+                        Extension.statusBarItem!.backgroundColor = undefined;
                         if (statusBarCheckTimer) {
                             clearInterval(statusBarCheckTimer);
                             statusBarCheckTimer = undefined;
@@ -220,13 +233,15 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             });
             target.getQueue().on("task.error", (job: QueueTask, error: string) => {
-                Extension.showErrorMessage(
-                    target.getName() +
-                        " => Can't upload file: " +
-                        vscode.workspace.asRelativePath(job.uri) +
-                        ". Details: " +
-                        error
-                );
+                if (!Extension.getLastErrorMessageTime() || Date.now() - Extension.getLastErrorMessageTime() >= 1000) {
+                    Extension.showErrorMessage(
+                        target.getName() +
+                            " => Can't upload file: " +
+                            vscode.workspace.asRelativePath(job.uri) +
+                            ". Details: " +
+                            error
+                    );
+                }
                 if (Configs.getConfigs().enableStatusBarItem) {
                     Extension.statusBarItem!.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
                     tooltipText =
@@ -249,7 +264,6 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
         if (Extension.isUriIgnored(uri)) {
-            Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
             return;
         }
         Targets.getActive().forEach((target) => {
@@ -274,7 +288,6 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
         if (Extension.isUriIgnored(uri)) {
-            Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
             return;
         }
         Targets.getActive().forEach((target) => {
@@ -299,7 +312,6 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
         if (Extension.isUriIgnored(uri)) {
-            Extension.appendLineToOutputChannel("File ignored: " + vscode.workspace.asRelativePath(uri.path));
             return;
         }
 

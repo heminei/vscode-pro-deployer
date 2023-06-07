@@ -2,8 +2,8 @@ import * as vscode from "vscode";
 import * as Queue from "./../Queue";
 
 export interface ConfigsInterface {
-    enableStatusBarItem?: true;
-    enableQuickPick?: false;
+    enableStatusBarItem?: boolean;
+    enableQuickPick?: boolean;
     autoDelete?: boolean;
     uploadOnSave?: boolean;
     checkGitignore?: boolean;

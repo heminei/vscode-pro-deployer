@@ -260,8 +260,17 @@ export class SFTP extends EventEmitter implements TargetInterface {
             }
         }
         const promise = new Promise<string>((resolve, reject) => {
+            if (!this.isConnected) {
+                reject("Not connected");
+                return;
+            }
+            if (!this.sftp) {
+                Extension.appendLineToOutputChannel("[ERROR][SFTP] SFTP client missing");
+                reject("SFTP client missing");
+                return;
+            }
             Extension.appendLineToOutputChannel("[INFO][SFTP] Try to create dir: " + dir);
-            this.sftp?.mkdir(dir, (err: any) => {
+            this.sftp.mkdir(dir, (err: any) => {
                 if (err) {
                     if (err.message.indexOf("No such file") !== -1) {
                         this.mkdir(path.dirname(dir)).then(

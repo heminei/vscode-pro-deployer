@@ -7,7 +7,7 @@ import { ConfigsInterface, TargetOptionsInterface } from "./targets/Interfaces";
 export class Configs {
     public static readonly sampleConfig: ConfigsInterface = {
         enableStatusBarItem: true,
-        enableQuickPick: false,
+        enableQuickPick: true,
         uploadOnSave: true,
         autoDelete: true,
         checkGitignore: false,
@@ -41,7 +41,7 @@ export class Configs {
 
     public static readonly defaultConfigs: ConfigsInterface = {
         enableStatusBarItem: true,
-        enableQuickPick: false,
+        enableQuickPick: true,
         autoDelete: true,
         uploadOnSave: true,
         checkGitignore: false,
@@ -106,7 +106,10 @@ export class Configs {
         });
 
         const disposables = vscode.workspace.onDidSaveTextDocument((e) => {
-            if (e.uri.path === Configs.getConfigFile().path) {
+            if (
+                vscode.workspace.asRelativePath(e.uri.path) ===
+                vscode.workspace.asRelativePath(Configs.getConfigFile().path)
+            ) {
                 let workspaceConfigs = Extension.extensionContext.workspaceState.get("configs");
                 if (!workspaceConfigs) {
                     workspaceConfigs = {};

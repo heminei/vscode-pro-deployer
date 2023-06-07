@@ -2,7 +2,7 @@
     "name": "pro-deployer",
     "displayName": "PRO Deployer - SFTP/FTP deployer",
     "description": "PRO Deployer - Simple and powerful SFTP/FTP deployer",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "publisher": "heminei",
     "categories": [
         "Other"
@@ -18,14 +18,14 @@
         "sftp",
         "deploy",
         "remote",
-        "multiple"
+        "multiple",
+        "concurrency"
     ],
     "icon": "icon.png",
     "engines": {
         "vscode": "^1.67.0"
     },
     "activationEvents": [
-        "onCommand:pro-deployer.generate-config-file",
         "workspaceContains:.vscode/pro-deployer.json"
     ],
     "main": "./out/extension.js",

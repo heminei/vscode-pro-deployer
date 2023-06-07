@@ -33,7 +33,7 @@ Config file location: `.vscode/pro-deployer.json`
 ```js
 {
     "enableStatusBarItem": true, //enable extension status bar item
-    "enableQuickPick": false, //enable quick pick when upload/error occurs
+    "enableQuickPick": true, //enable quick pick when upload/error occurs
     "uploadOnSave": true, //on file change will be uploaded to active targets
     "autoDelete": true, //on file delete will be deleted to active targets
     "checkGitignore": false, //skip files that are ignored in .gitignore
