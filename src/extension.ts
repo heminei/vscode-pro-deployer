@@ -135,7 +135,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         let statusBarCheckTimer: NodeJS.Timeout | undefined = undefined;
         let tooltipText = "";
-        Targets.getActive().forEach((target) => {
+        Targets.getItems().forEach((target) => {
             target.getQueue().on("start", () => {
                 if (Configs.getConfigs().enableStatusBarItem) {
                     Extension.statusBarItem!.text = "$(sync~spin) PRO Deployer";

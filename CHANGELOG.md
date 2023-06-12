@@ -4,6 +4,10 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [2.2.2]
+
+- fixed bug: missing loaders on non active targets
+
 ## [2.2.1]
 
 - fixed bug on windows ftp server: doesn't create new folders

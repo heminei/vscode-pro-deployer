@@ -34,6 +34,11 @@
   * The provided test runner will only consider files matching the name pattern `**.test.ts`.
   * You can create folders inside the `test` folder to structure your tests any way you want.
 
+## Build
+
+* Install vsce: `npm install -g @vscode/vsce`
+* Run `vsce package` from a terminal to create a `.vsix` file in the root folder of your project.
+
 ## Go further
 
 * [Follow UX guidelines](https://code.visualstudio.com/api/ux-guidelines/overview) to create extensions that seamlessly integrate with VS Code's native interface and patterns.
