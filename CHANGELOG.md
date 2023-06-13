@@ -4,6 +4,15 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [2.3.1]
+
+- added a new command: `pro-deployer.download`
+- added a new command: `pro-deployer.download-from`
+- added a new command: `pro-deployer.download-all-files`
+ added a new command: `pro-deployer.diff-with`
+- rename `pro-deployer.cancel-all-uploads` to `pro-deployer.cancel-all-actions`
+- move context menu commands to submenu
+
 ## [2.2.2]
 
 - fixed bug: missing loaders on non active targets

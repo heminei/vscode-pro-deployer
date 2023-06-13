@@ -2,7 +2,7 @@
     "name": "pro-deployer",
     "displayName": "PRO Deployer - SFTP/FTP deployer",
     "description": "PRO Deployer - Simple and powerful SFTP/FTP deployer",
-    "version": "2.2.2",
+    "version": "2.3.1",
     "publisher": "heminei",
     "categories": [
         "Other"
@@ -52,13 +52,33 @@
                 "category": "PRO Deployer"
             },
             {
+                "command": "pro-deployer.download",
+                "title": "Download",
+                "category": "PRO Deployer"
+            },
+            {
+                "command": "pro-deployer.download-from",
+                "title": "Download From...",
+                "category": "PRO Deployer"
+            },
+            {
+                "command": "pro-deployer.download-all-files",
+                "title": "Download All Files From...",
+                "category": "PRO Deployer"
+            },
+            {
                 "command": "pro-deployer.show-output-channel",
                 "title": "Show Output Channel",
                 "category": "PRO Deployer"
             },
             {
-                "command": "pro-deployer.cancel-all-uploads",
-                "title": "Cancel all uploads",
+                "command": "pro-deployer.cancel-all-actions",
+                "title": "Cancel all actions",
+                "category": "PRO Deployer"
+            },
+            {
+                "command": "pro-deployer.diff-with",
+                "title": "Diff with...",
                 "category": "PRO Deployer"
             }
         ],
@@ -67,30 +87,55 @@
                 "command": "pro-deployer.upload",
                 "key": "alt+u",
                 "mac": "alt+u"
+            },
+            {
+                "command": "pro-deployer.download",
+                "key": "alt+d",
+                "mac": "alt+d"
             }
         ],
         "menus": {
             "editor/context": [
                 {
-                    "command": "pro-deployer.upload",
-                    "group": "pro-deployer"
-                },
-                {
-                    "command": "pro-deployer.upload-to",
+                    "submenu": "pro-deployer/context",
                     "group": "pro-deployer"
                 }
             ],
             "explorer/context": [
                 {
+                    "submenu": "pro-deployer/context",
+                    "group": "pro-deployer"
+                }
+            ],
+            "pro-deployer/context": [
+                {
                     "command": "pro-deployer.upload",
                     "group": "pro-deployer"
                 },
                 {
                     "command": "pro-deployer.upload-to",
                     "group": "pro-deployer"
+                },
+                {
+                    "command": "pro-deployer.download",
+                    "group": "pro-deployer"
+                },
+                {
+                    "command": "pro-deployer.download-from",
+                    "group": "pro-deployer"
+                },
+                {
+                    "command": "pro-deployer.diff-with",
+                    "group": "pro-deployer"
                 }
             ]
-        }
+        },
+        "submenus": [
+            {
+                "label": "PRO Deployer",
+                "id": "pro-deployer/context"
+            }
+        ]
     },
     "scripts": {
         "vscode:prepublish": "npm run compile",

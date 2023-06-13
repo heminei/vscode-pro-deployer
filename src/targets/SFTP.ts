@@ -217,6 +217,129 @@ export class SFTP extends EventEmitter implements TargetInterface {
             this.queue.push(job);
         });
     }
+    download(uri: vscode.Uri, destination?: vscode.Uri): Promise<vscode.Uri> {
+        const relativePath = vscode.workspace.asRelativePath(uri);
+
+        if (destination === undefined) {
+            destination = uri;
+        }
+
+        return new Promise<vscode.Uri>((resolve, reject) => {
+            if (!this.isConnected) {
+                reject("Not connected");
+                return;
+            }
+
+            const job = <QueueTask>((cb) => {
+                if (!this.sftp) {
+                    Extension.appendLineToOutputChannel("[ERROR][SFTP] SFTP client missing");
+                    return;
+                }
+                Extension.appendLineToOutputChannel("[INFO][SFTP] Read file: '" + relativePath);
+                this.sftp.readFile(this.options.dir + relativePath, {}, (err, handle) => {
+                    if (err) {
+                        cb(err);
+                        reject(err);
+                        return;
+                    }
+                    vscode.workspace.fs.writeFile(destination!, handle).then(
+                        () => {
+                            Extension.appendLineToOutputChannel("[INFO][SFTP] File downloaded: '" + relativePath);
+                            cb();
+                            resolve(uri);
+                        },
+                        (reason) => {
+                            cb(reason);
+                            reject(reason);
+                        }
+                    );
+                });
+            });
+            job.uri = uri;
+            job.isFile = true;
+            job.action = "download";
+            this.queue.push(job);
+        });
+    }
+    downloadDir(uri: vscode.Uri): Promise<vscode.Uri> {
+        var relativePath = vscode.workspace.asRelativePath(uri);
+        if (relativePath === Extension.getActiveWorkspaceFolderPath()) {
+            relativePath = "";
+        }
+
+        return new Promise<vscode.Uri>((resolve, reject) => {
+            if (!this.isConnected) {
+                reject("Not connected");
+                return;
+            }
+
+            const readDir = (dir: string): Promise<any> => {
+                return new Promise<any>((readDirResolve, readDirReject) => {
+                    Extension.appendLineToOutputChannel("[INFO][SFTP] Start read dir: '" + dir);
+                    this.sftp?.readdir(this.options.dir + dir, (err, list) => {
+                        if (err) {
+                            Extension.appendLineToOutputChannel(
+                                "[ERROR][SFTP] Can't read dir: '" + dir + "'. Error: " + err
+                            );
+                            readDirReject(err);
+                            return;
+                        }
+                        Extension.appendLineToOutputChannel("[INFO][SFTP] Dir files: " + list.length);
+                        let statPromises: Promise<vscode.Uri>[] = [];
+
+                        list.forEach((item) => {
+                            statPromises.push(
+                                new Promise<vscode.Uri>((statResolve, statReject) => {
+                                    const file = vscode.Uri.file(
+                                        Extension.getActiveWorkspaceFolderPath() + "/" + dir + "/" + item.filename
+                                    );
+                                    this.sftp?.stat(this.options.dir + dir + "/" + item.filename, (err, stats) => {
+                                        if (err) {
+                                            Extension.appendLineToOutputChannel(
+                                                "[ERROR][SFTP] Can't get stat for: '" +
+                                                    this.options.dir +
+                                                    dir +
+                                                    "/" +
+                                                    item.filename +
+                                                    "'. Error: " +
+                                                    err
+                                            );
+                                            statReject(err);
+                                            return;
+                                        }
+
+                                        let downloadOrReadPromise: Promise<any> | undefined = undefined;
+
+                                        if (stats.isFile()) {
+                                            downloadOrReadPromise = this.download(file);
+                                        } else if (stats.isDirectory()) {
+                                            downloadOrReadPromise = readDir(dir + "/" + item.filename);
+                                        }
+                                        if (!downloadOrReadPromise) {
+                                            statReject("Unknown file type");
+                                            return;
+                                        }
+                                        downloadOrReadPromise.finally(() => {
+                                            statResolve(file);
+                                        });
+                                    });
+                                })
+                            );
+                        });
+
+                        Promise.all(statPromises).finally(() => {
+                            readDirResolve(list);
+                        });
+                    });
+                });
+            };
+
+            readDir(relativePath).finally(() => {
+                resolve(uri);
+                Extension.appendLineToOutputChannel("[INFO][SFTP] Dir downloaded: '" + relativePath);
+            });
+        });
+    }
     deleteDir(uri: vscode.Uri): Promise<vscode.Uri> {
         const relativePath = vscode.workspace.asRelativePath(uri);
 

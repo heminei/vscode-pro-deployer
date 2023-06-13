@@ -129,7 +129,6 @@ export class FTP extends EventEmitter implements TargetInterface {
                 Extension.appendLineToOutputChannel("[INFO][FTP] Start uploading file: " + relativePath);
                 this.client.put(uri.fsPath, this.options.dir + relativePath, (err) => {
                     if (err) {
-                        console.log("err", err);
                         if (
                             err.message.indexOf("No such file") !== -1 ||
                             err.message.indexOf("Couldn't open the file or directory") !== -1
@@ -210,7 +209,7 @@ export class FTP extends EventEmitter implements TargetInterface {
                         reject(err);
                         return;
                     }
-                    Extension.appendLineToOutputChannel("[INFO][SFTP] File deleted: '" + relativePath);
+                    Extension.appendLineToOutputChannel("[INFO][FTP] File deleted: '" + relativePath);
                     cb();
                     resolve(uri);
                 });
@@ -219,6 +218,125 @@ export class FTP extends EventEmitter implements TargetInterface {
             job.isFile = true;
             job.action = "delete";
             this.queue.push(job);
+        });
+    }
+    download(uri: vscode.Uri, destination?: vscode.Uri): Promise<vscode.Uri> {
+        const relativePath = vscode.workspace.asRelativePath(uri);
+
+        if (destination === undefined) {
+            destination = uri;
+        }
+
+        return new Promise<vscode.Uri>((resolve, reject) => {
+            if (!this.isConnected) {
+                reject("Not connected");
+                return;
+            }
+
+            const job = <QueueTask>((cb) => {
+                if (!this.client) {
+                    Extension.appendLineToOutputChannel("[ERROR][FTP] FTP client missing");
+                    return;
+                }
+                Extension.appendLineToOutputChannel("[INFO][FTP] Read file: '" + relativePath);
+                this.client.get(this.options.dir + relativePath, (err, stream) => {
+                    if (err) {
+                        cb(err);
+                        reject(err);
+                        return;
+                    }
+
+                    this.stream2buffer(stream).then(
+                        (buffer) => {
+                            vscode.workspace.fs.writeFile(destination!, buffer).then(
+                                () => {
+                                    Extension.appendLineToOutputChannel(
+                                        "[INFO][FTP] File downloaded: '" + relativePath
+                                    );
+                                    cb();
+                                    resolve(uri);
+                                },
+                                (reason) => {
+                                    cb(reason);
+                                    reject(reason);
+                                }
+                            );
+                        },
+                        (reason) => {
+                            cb(reason);
+                            reject(reason);
+                        }
+                    );
+                });
+            });
+            job.uri = uri;
+            job.isFile = true;
+            job.action = "download";
+            this.queue.push(job);
+        });
+    }
+
+    stream2buffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
+        return new Promise<Buffer>((resolve, reject) => {
+            const _buf = Array<any>();
+
+            stream.on("data", (chunk) => {
+                _buf.push(chunk);
+            });
+            stream.on("end", () => resolve(Buffer.concat(_buf)));
+            stream.on("error", (err) => reject(`error converting stream - ${err}`));
+        });
+    }
+
+    downloadDir(uri: vscode.Uri): Promise<vscode.Uri> {
+        var relativePath = vscode.workspace.asRelativePath(uri);
+        if (relativePath === Extension.getActiveWorkspaceFolderPath()) {
+            relativePath = "";
+        }
+
+        return new Promise<vscode.Uri>((resolve, reject) => {
+            if (!this.isConnected) {
+                reject("Not connected");
+                return;
+            }
+
+            const readDir = (dir: string): Promise<any> => {
+                return new Promise<any>((readDirResolve, readDirReject) => {
+                    Extension.appendLineToOutputChannel("[INFO][FTP] Start read dir: '" + dir);
+                    this.client?.list(this.options.dir + dir, (err, list) => {
+                        if (err) {
+                            Extension.appendLineToOutputChannel(
+                                "[ERROR][FTP] Can't read dir: '" + dir + "'. Error: " + err
+                            );
+                            readDirReject(err);
+                            return;
+                        }
+                        Extension.appendLineToOutputChannel("[INFO][FTP] Dir files: " + list.length);
+                        let downloadOrReadPromises: Promise<vscode.Uri>[] = [];
+
+                        list.forEach((item) => {
+                            const file = vscode.Uri.file(
+                                Extension.getActiveWorkspaceFolderPath() + "/" + dir + "/" + item.name
+                            );
+
+                            if (item.type === "-") {
+                                downloadOrReadPromises.push(this.download(file));
+                            } else if (item.type === "d") {
+                                downloadOrReadPromises.push(readDir(dir + "/" + item.name));
+                            }
+                        });
+
+                        Promise.all(downloadOrReadPromises).finally(() => {
+                            readDirResolve(list);
+                        });
+                    });
+                });
+            };
+
+            readDir(relativePath).finally(() => {
+                resolve(uri);
+                Extension.appendLineToOutputChannel("[INFO][FTP] Dir downloaded: '" + relativePath);
+            });
         });
     }
     deleteDir(uri: vscode.Uri): Promise<vscode.Uri> {

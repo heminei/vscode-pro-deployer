@@ -16,6 +16,8 @@ PRO Deployer - Simple and powerful SFTP/FTP deployer. Support **concurrency** up
 - support `binary` and `ascii` data transfer types
 - support status bar item
 - support quick pick dialog
+- download files or folders from targets
+- diff tool: compare local file with remote file
 
 ## Donation
 
@@ -38,7 +40,7 @@ Config file location: `.vscode/pro-deployer.json`
     "autoDelete": true, //on file delete will be deleted to active targets
     "checkGitignore": false, //skip files that are ignored in .gitignore
     "activeTargets": [
-        "My FTP"
+        "My SFTP"
     ],
     "concurrency": 5, //maximum number of concurrent actions (upload/delete)
     "ignore": [
@@ -46,16 +48,6 @@ Config file location: `.vscode/pro-deployer.json`
         ".vscode/**/*"
     ],
     "targets": [
-        {
-            "name": "My FTP",
-            "type": "ftp",
-            "host": "localhost",
-            "port": 21,
-            "user": "admin",
-            "password": "123456",
-            "dir": "/public_html",
-            "transferDataType": "binary"
-        },
         {
             "name": "My SFTP",
             "type": "sftp",
@@ -66,6 +58,16 @@ Config file location: `.vscode/pro-deployer.json`
             "dir": "/public_html",
             "privateKey": null,
             "passphrase": null
+        },
+        {
+            "name": "My FTP",
+            "type": "ftp",
+            "host": "localhost",
+            "port": 21,
+            "user": "admin",
+            "password": "123456",
+            "dir": "/public_html",
+            "transferDataType": "binary"
         }
     ]
 }
@@ -79,6 +81,9 @@ This extension contributes the following commands:
 - `pro-deployer.generate-config-file`: auto generate config file
 - `pro-deployer.upload`: upload file or folder
 - `pro-deployer.upload-to`: upload file or folder to selected target
+- `pro-deployer.download`: download file or folder
+- `pro-deployer.download-from`: download file or folder from selected target
+- `pro-deployer.diff-with`: compare local file with remote file
 - `pro-deployer.upload-all-open`: upload all open files
 - `pro-deployer.show-output-channel`: show output channel of PRO Deployer
-- `pro-deployer.cancel-all-uploads`: stop all uploads and remove all files from queue
+- `pro-deployer.cancel-all-actions`: stop all actions (uploads, downloads, deletes) and remove all actions from queue

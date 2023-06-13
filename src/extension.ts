@@ -5,6 +5,7 @@ import fs = require("fs");
 import micromatch = require("micromatch");
 import parser = require("gitignore-parser");
 import { QueueTask } from "./targets/Interfaces";
+import { MemFS } from "./fileSystemProvider";
 
 export class Extension {
     public static mode = "prod";
@@ -148,7 +149,7 @@ export function activate(context: vscode.ExtensionContext) {
                             });
                             if (allPendingTasks > 1) {
                                 Extension.statusBarItem!.text =
-                                    "$(sync~spin) PRO Deployer: Uploading (" + (allPendingTasks + 1) + ")...";
+                                    "$(sync~spin) PRO Deployer: " + (allPendingTasks + 1) + "...";
                                 Extension.statusBarItem!.tooltip = tooltipText;
                             }
                         }, 300);
@@ -236,7 +237,9 @@ export function activate(context: vscode.ExtensionContext) {
                 if (!Extension.getLastErrorMessageTime() || Date.now() - Extension.getLastErrorMessageTime() >= 1000) {
                     Extension.showErrorMessage(
                         target.getName() +
-                            " => Can't upload file: " +
+                            " => Can't " +
+                            job.action +
+                            " file: " +
                             vscode.workspace.asRelativePath(job.uri) +
                             ". Details: " +
                             error
@@ -333,6 +336,11 @@ export function activate(context: vscode.ExtensionContext) {
         });
     });
 
+    const memFs = new MemFS();
+    context.subscriptions.push(
+        vscode.workspace.registerFileSystemProvider("pro-deployer-fs", memFs, { isCaseSensitive: true })
+    );
+
     context.subscriptions.push(fileWatcher);
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.generate-config-file", () => {
@@ -345,7 +353,7 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
     context.subscriptions.push(
-        vscode.commands.registerCommand("pro-deployer.cancel-all-uploads", () => {
+        vscode.commands.registerCommand("pro-deployer.cancel-all-actions", () => {
             Targets.getItems().forEach((item) => {
                 item.getQueue().end();
             });
@@ -411,6 +419,11 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
+            if (Targets.getActive().length === 0) {
+                Extension.showErrorMessage("No active targets");
+                return;
+            }
+
             Targets.getActive().forEach((target) => {
                 target.connect(() => {
                     thisArg.forEach((uri) => {
@@ -457,6 +470,142 @@ export function activate(context: vscode.ExtensionContext) {
                 target.connect(() => {
                     files.forEach((textDocument) => {
                         target.upload(textDocument.uri);
+                    });
+                });
+            });
+        })
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand("pro-deployer.download", (uri: vscode.Uri, thisArg: vscode.Uri[]) => {
+            if (!thisArg) {
+                if (!uri && vscode.window.activeTextEditor?.document.uri) {
+                    uri = vscode.window.activeTextEditor?.document.uri;
+                }
+                if (uri) {
+                    thisArg = [uri];
+                }
+            }
+            if (!thisArg) {
+                Extension.showErrorMessage("Can't find files for downloading");
+                return;
+            }
+            if (Targets.getActive().length === 0) {
+                Extension.showErrorMessage("No active targets");
+                return;
+            }
+
+            const target = Targets.getActive()[0];
+
+            target.connect(() => {
+                thisArg.forEach((uri) => {
+                    Extension.isLikeFile(uri).then((isFile) => {
+                        if (isFile) {
+                            target.download(uri);
+                        } else {
+                            target.downloadDir(uri);
+                        }
+                    });
+                });
+            });
+        })
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand("pro-deployer.download-from", (uri: vscode.Uri, thisArg: vscode.Uri[]) => {
+            if (!thisArg) {
+                if (!uri && vscode.window.activeTextEditor?.document.uri) {
+                    uri = vscode.window.activeTextEditor?.document.uri;
+                }
+                if (uri) {
+                    thisArg = [uri];
+                }
+            }
+            if (!thisArg) {
+                Extension.showErrorMessage("Can't find files for downloading");
+                return;
+            }
+
+            const items = Targets.getItems().map((item) => {
+                return item.getName();
+            });
+            vscode.window.showQuickPick(items).then((value) => {
+                if (!value) {
+                    return;
+                }
+
+                const target = Targets.findByName(value);
+
+                target.connect(() => {
+                    thisArg.forEach((uri) => {
+                        Extension.isLikeFile(uri).then((isFile) => {
+                            if (isFile) {
+                                target.download(uri);
+                            } else {
+                                target.downloadDir(uri);
+                            }
+                        });
+                    });
+                });
+            });
+        })
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand("pro-deployer.download-all-files", (uri: vscode.Uri, thisArg: vscode.Uri[]) => {
+            const workspaceFolderPath = Extension.getActiveWorkspaceFolderPath();
+
+            if (!workspaceFolderPath) {
+                Extension.showErrorMessage("Can't find workspace folder");
+                return;
+            }
+
+            const workspaceFolderPathUri = vscode.Uri.file(workspaceFolderPath);
+
+            const items = Targets.getItems().map((item) => {
+                return item.getName();
+            });
+            vscode.window.showQuickPick(items).then((value) => {
+                if (!value) {
+                    return;
+                }
+
+                const target = Targets.findByName(value);
+
+                target.connect(() => {
+                    target.downloadDir(workspaceFolderPathUri);
+                });
+            });
+        })
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand("pro-deployer.diff-with", (uri: vscode.Uri, thisArg: vscode.Uri[]) => {
+            const workspaceFolderPath = Extension.getActiveWorkspaceFolderPath();
+
+            if (!workspaceFolderPath) {
+                Extension.showErrorMessage("Can't find workspace folder");
+                return;
+            }
+
+            const items = Targets.getItems().map((item) => {
+                return item.getName();
+            });
+            vscode.window.showQuickPick(items).then((value) => {
+                if (!value) {
+                    return;
+                }
+
+                const target = Targets.findByName(value);
+
+                target.connect(() => {
+                    Extension.isLikeFile(uri).then((isFile) => {
+                        if (isFile) {
+                            let destination = vscode.Uri.parse(
+                                "pro-deployer-fs:/" + vscode.workspace.asRelativePath(uri)
+                            );
+                            target.download(uri, destination).then(() => {
+                                vscode.commands.executeCommand("vscode.diff", destination, uri);
+                            });
+                        } else {
+                            Extension.showErrorMessage("Can't diff directory");
+                        }
                     });
                 });
             });
