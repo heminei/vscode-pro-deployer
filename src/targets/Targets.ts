@@ -1,4 +1,3 @@
-import * as vscode from "vscode";
 import { Configs } from "../configs";
 import { Extension } from "../extension";
 import { FTP } from "./FTP";
