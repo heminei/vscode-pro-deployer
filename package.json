@@ -3,6 +3,9 @@
     "displayName": "PRO Deployer - SFTP/FTP deployer",
     "description": "PRO Deployer - Simple and powerful SFTP/FTP deployer",
     "version": "2.3.1",
+    "engines": {
+        "vscode": "^1.67.0"
+    },
     "publisher": "heminei",
     "categories": [
         "Other"
@@ -22,9 +25,6 @@
         "concurrency"
     ],
     "icon": "icon.png",
-    "engines": {
-        "vscode": "^1.67.0"
-    },
     "activationEvents": [
         "workspaceContains:.vscode/pro-deployer.json"
     ],
@@ -150,23 +150,23 @@
         "gitignore-parser": "^0.0.2",
         "micromatch": "^4.0.5",
         "path": "^0.12.7",
-        "ssh2": "^1.13.0"
+        "ssh2": "0.8.9"
     },
     "devDependencies": {
-        "@types/ftp": "^0.3.33",
-        "@types/gitignore-parser": "^0.0.0",
-        "@types/glob": "^8.1.0",
-        "@types/micromatch": "^4.0.2",
         "@types/mocha": "^10.0.1",
         "@types/node": "16.x",
-        "@types/vscode": "^1.67.0",
-        "@typescript-eslint/eslint-plugin": "^5.48.0",
-        "@typescript-eslint/parser": "^5.48.0",
-        "@vscode/test-electron": "^2.2.1",
-        "@types/ssh2": "^1.11.11",
-        "eslint": "^8.40.0",
-        "glob": "^10.2.4",
+        "@types/vscode": "^1.82.0",
+        "@types/glob": "^8.1.0",
+        "@typescript-eslint/eslint-plugin": "^6.4.1",
+        "@typescript-eslint/parser": "^6.4.1",
+        "@vscode/test-electron": "^2.3.4",
+        "eslint": "^8.47.0",
+        "glob": "^10.3.3",
         "mocha": "^10.2.0",
-        "typescript": "^4.9.4"
+        "typescript": "^5.1.6",
+        "@types/ftp": "^0.3.34",
+        "@types/gitignore-parser": "^0.0.1",
+        "@types/micromatch": "^4.0.2",
+        "@types/ssh2": "^1.11.14"
     }
 }
