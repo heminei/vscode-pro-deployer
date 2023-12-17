@@ -6,6 +6,7 @@ import * as vscode from "vscode";
 import { Queue } from "../Queue";
 import EventEmitter = require("events");
 import { Configs } from "../configs";
+import { Targets } from "./Targets";
 
 export class FTP extends EventEmitter implements TargetInterface {
     private client = new Client();
@@ -117,7 +118,7 @@ export class FTP extends EventEmitter implements TargetInterface {
         });
     }
     upload(uri: vscode.Uri, attempts = 1): Promise<vscode.Uri> {
-        const relativePath = vscode.workspace.asRelativePath(uri);
+        const relativePath = Targets.getRelativePath(this.options, uri);
 
         return new Promise<vscode.Uri>((resolve, reject) => {
             if (!this.isConnected) {
@@ -194,7 +195,7 @@ export class FTP extends EventEmitter implements TargetInterface {
         });
     }
     delete(uri: vscode.Uri): Promise<vscode.Uri> {
-        const relativePath = vscode.workspace.asRelativePath(uri);
+        const relativePath = Targets.getRelativePath(this.options, uri);
 
         return new Promise<vscode.Uri>((resolve, reject) => {
             if (!this.isConnected) {
@@ -221,7 +222,7 @@ export class FTP extends EventEmitter implements TargetInterface {
         });
     }
     download(uri: vscode.Uri, destination?: vscode.Uri): Promise<vscode.Uri> {
-        const relativePath = vscode.workspace.asRelativePath(uri);
+        const relativePath = Targets.getRelativePath(this.options, uri);
 
         if (destination === undefined) {
             destination = uri;
@@ -289,7 +290,7 @@ export class FTP extends EventEmitter implements TargetInterface {
     }
 
     downloadDir(uri: vscode.Uri): Promise<vscode.Uri> {
-        var relativePath = vscode.workspace.asRelativePath(uri);
+        var relativePath = Targets.getRelativePath(this.options, uri);
         if (relativePath === Extension.getActiveWorkspaceFolderPath()) {
             relativePath = "";
         }
@@ -340,7 +341,7 @@ export class FTP extends EventEmitter implements TargetInterface {
         });
     }
     deleteDir(uri: vscode.Uri): Promise<vscode.Uri> {
-        const relativePath = vscode.workspace.asRelativePath(uri);
+        const relativePath = Targets.getRelativePath(this.options, uri);
 
         return new Promise<vscode.Uri>((resolve, reject) => {
             if (!this.isConnected) {

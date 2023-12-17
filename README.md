@@ -47,6 +47,7 @@ Config file location: `.vscode/pro-deployer.json`
         ".git/**/*",
         ".vscode/**/*"
     ],
+    "include" [], // This option allows you to specify which files/folders to include in the auto upload/delete. If this option is not specified, all files/folders will be included.
     "targets": [
         {
             "name": "My SFTP",
@@ -56,6 +57,7 @@ Config file location: `.vscode/pro-deployer.json`
             "user": "admin",
             "password": "123456",
             "dir": "/public_html",
+            "baseDir": "/", //This option is useful when you want to upload files from a subdirectory of the project
             "privateKey": null,
             "passphrase": null
         },
@@ -67,6 +69,7 @@ Config file location: `.vscode/pro-deployer.json`
             "user": "admin",
             "password": "123456",
             "dir": "/public_html",
+            "baseDir": "/", //This option is useful when you want to upload files from a subdirectory of the project
             "transferDataType": "binary"
         }
     ]

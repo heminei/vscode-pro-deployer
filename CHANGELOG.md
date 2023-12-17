@@ -4,6 +4,11 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [2.4.1]
+
+- added a new option on target level: `baseDir`. This option allows you to set the base directory for the target. This option is useful when you want to upload files from a subdirectory of the project.
+- added a new global option: `include`. This option allows you to specify which files/folders to include in the auto upload/delete. If this option is not specified, all files/folders will be included.
+
 ## [2.3.1]
 
 - added a new command: `pro-deployer.download`

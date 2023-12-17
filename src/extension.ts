@@ -77,30 +77,30 @@ export class Extension {
     }
 
     public static isUriIgnored(uri: vscode.Uri): boolean {
+        const relativePath = vscode.workspace.asRelativePath(uri.path);
+
         if (uri.scheme === "git") {
-            Extension.appendLineToOutputChannel("File ignored (git): " + vscode.workspace.asRelativePath(uri.path));
+            Extension.appendLineToOutputChannel("File ignored (git): " + relativePath);
             return true;
         }
         if (uri.path === Configs.getConfigFile().path) {
             Extension.appendLineToOutputChannel("File ignored (config file)");
             return true;
         }
-        if (micromatch.isMatch(vscode.workspace.asRelativePath(uri.path), Configs.getConfigs().ignore)) {
-            Extension.appendLineToOutputChannel(
-                "File ignored (ignore option): " + vscode.workspace.asRelativePath(uri.path)
-            );
+        if (micromatch.isMatch(relativePath, Configs.getConfigs().ignore)) {
+            Extension.appendLineToOutputChannel("File/folder ignored (ignore option): " + relativePath);
             return true;
+        }
+        if (Configs.getConfigs().include.length > 0) {
+            if (micromatch.isMatch(relativePath, Configs.getConfigs().include) === false) {
+                Extension.appendLineToOutputChannel("File/folder not included (include option): " + relativePath);
+                return true;
+            }
         }
         if (Configs.getConfigs().checkGitignore) {
             if (fs.existsSync(Configs.getGitignoreFile().path)) {
-                if (
-                    parser
-                        .compile(fs.readFileSync(Configs.getGitignoreFile().path).toString())
-                        .denies(vscode.workspace.asRelativePath(uri.path))
-                ) {
-                    Extension.appendLineToOutputChannel(
-                        "File ignored (.gitignore): " + vscode.workspace.asRelativePath(uri.path)
-                    );
+                if (parser.compile(fs.readFileSync(Configs.getGitignoreFile().path).toString()).denies(relativePath)) {
+                    Extension.appendLineToOutputChannel("File ignored (.gitignore): " + relativePath);
                     return true;
                 }
             }

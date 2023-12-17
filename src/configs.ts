@@ -14,6 +14,7 @@ export class Configs {
         activeTargets: ["My FTP"],
         concurrency: 5,
         ignore: [".git/**/*", ".vscode/**/*"],
+        include: [],
         targets: [
             {
                 name: "My FTP",
@@ -23,6 +24,7 @@ export class Configs {
                 user: "admin",
                 password: "123456",
                 dir: "/",
+                baseDir: "/",
                 transferDataType: "binary",
             },
             {
@@ -33,6 +35,7 @@ export class Configs {
                 user: "admin",
                 password: "123456",
                 dir: "/",
+                baseDir: "/",
                 privateKey: null,
                 passphrase: null,
             },
@@ -47,6 +50,7 @@ export class Configs {
         checkGitignore: false,
         concurrency: 5,
         ignore: [".git/**/*", ".vscode/**/*"],
+        include: [],
         activeTargets: [],
         targets: [],
     };

@@ -11,13 +11,14 @@ export interface ConfigsInterface {
     activeTargets?: string[];
     targets?: TargetOptionsInterface[];
     ignore: string[];
+    include: string[];
 }
 export interface TargetOptionsInterface {
     name: string;
     type: TargetTypes;
     host: string;
     dir: string;
-    url?: string;
+    baseDir?: string;
     port?: number;
     user?: string;
     password?: string;

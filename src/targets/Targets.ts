@@ -3,6 +3,7 @@ import { Extension } from "../extension";
 import { FTP } from "./FTP";
 import { SFTP } from "./SFTP";
 import { TargetInterface, TargetOptionsInterface, TargetTypes } from "./Interfaces";
+import * as vscode from "vscode";
 
 export class Targets {
     private static items: TargetInterface[] = [];
@@ -55,5 +56,22 @@ export class Targets {
         }
 
         return null;
+    }
+
+    public static getRelativePath(targetConfig: TargetOptionsInterface, uri: vscode.Uri): string {
+        let relativePath = vscode.workspace.asRelativePath(uri);
+        let baseDir = targetConfig.baseDir ?? "/";
+
+        if (baseDir.startsWith("/") === true) {
+            baseDir = baseDir.substring(1);
+        }
+        if (baseDir.endsWith("/") === false) {
+            baseDir = baseDir + "/";
+        }
+        if (relativePath.startsWith(baseDir) === true) {
+            relativePath = relativePath.substring(baseDir.length);
+        }
+
+        return relativePath;
     }
 }
