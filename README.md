@@ -90,3 +90,4 @@ This extension contributes the following commands:
 - `pro-deployer.upload-all-open`: upload all open files
 - `pro-deployer.show-output-channel`: show output channel of PRO Deployer
 - `pro-deployer.cancel-all-actions`: stop all actions (uploads, downloads, deletes) and remove all actions from queue
+- `pro-deployer.upload-all-uncommitted`: upload all uncommitted files

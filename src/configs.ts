@@ -1,6 +1,5 @@
 import { TextEncoder } from "util";
 import * as vscode from "vscode";
-import * as fs from "fs";
 import { Extension } from "./extension";
 import { ConfigsInterface, TargetOptionsInterface } from "./targets/Interfaces";
 
@@ -11,22 +10,11 @@ export class Configs {
         uploadOnSave: true,
         autoDelete: true,
         checkGitignore: false,
-        activeTargets: ["My FTP"],
+        activeTargets: ["My SFTP"],
         concurrency: 5,
         ignore: [".git/**/*", ".vscode/**/*"],
         include: [],
         targets: [
-            {
-                name: "My FTP",
-                type: "ftp",
-                host: "localhost",
-                port: 21,
-                user: "admin",
-                password: "123456",
-                dir: "/",
-                baseDir: "/",
-                transferDataType: "binary",
-            },
             {
                 name: "My SFTP",
                 type: "sftp",
@@ -38,6 +26,17 @@ export class Configs {
                 baseDir: "/",
                 privateKey: null,
                 passphrase: null,
+            },
+            {
+                name: "My FTP",
+                type: "ftp",
+                host: "localhost",
+                port: 21,
+                user: "admin",
+                password: "123456",
+                dir: "/",
+                baseDir: "/",
+                transferDataType: "binary",
             },
         ] as TargetOptionsInterface[],
     };

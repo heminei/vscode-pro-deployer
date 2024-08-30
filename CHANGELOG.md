@@ -4,6 +4,17 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [2.5.1]
+
+- fixed small bugs
+
+## [2.5.0]
+
+- updated dependencies
+- added a new command: `pro-deployer.upload-all-uncommitted`. This command uploads all uncommitted files to the target.
+- added a new menu on editor title context menu.
+- added a new menu on source control changes context menu.
+
 ## [2.4.1]
 
 - added a new option on target level: `baseDir`. This option allows you to set the base directory for the target. This option is useful when you want to upload files from a subdirectory of the project.
