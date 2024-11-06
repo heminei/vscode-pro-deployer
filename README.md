@@ -26,7 +26,13 @@ If you like this extension, you could become a backer or sponsor via **[PayPal](
 ## Usage
 
 1. Ctrl+Shift+P on Windows/Linux or Cmd+Shift+P on Mac open command palette, run `PRO Deployer: Generate Config File`.
-2. Enjoy.
+2. Now you should have a new menu item `PRO Deployer` in the context menu of the file explorer or in opened files. Also, you can run commands from the command palette. If you is enabled `uploadOnSave` option, on file save will be uploaded automatically.
+3. Enjoy.
+
+## Keyboard Shortcuts
+
+1. `Alt+U` - upload file
+2. `Alt+D` - download file
 
 ## Example Configs
 
@@ -47,7 +53,7 @@ Config file location: `.vscode/pro-deployer.json`
         ".git/**/*",
         ".vscode/**/*"
     ],
-    "include" [], // This option allows you to specify which files/folders to include in the auto upload/delete. If this option is not specified, all files/folders will be included.
+    "include": [], // This option allows you to specify which files/folders to include in the auto upload/delete. If this option is not specified, all files/folders will be included.
     "targets": [
         {
             "name": "My SFTP",
