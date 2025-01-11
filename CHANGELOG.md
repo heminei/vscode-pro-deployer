@@ -4,6 +4,15 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [3.0.0]
+
+This is beta version. Please report any bugs.
+
+- support workspaces! Now you can have multiple Pro Deployer configurations for each workspace. The first workspace folder is used for default configuration for UI/UX settings. All other settings will be used according to the active workspace. When use `pro-deployer.upload-all-open` or `pro-deployer.download-all-files` will be uploaded/downloaded files from the selected target workspace.
+- updated dependencies.
+- added information messages.
+- fixed small bugs.
+
 ## [2.5.1]
 
 - fixed small bugs

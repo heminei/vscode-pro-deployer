@@ -21,7 +21,10 @@ export class Targets {
 
     public static getActive() {
         return Targets.items.filter((target) => {
-            let isActive = Configs.getConfigs().activeTargets?.indexOf(target.getName()) !== -1;
+            if (Extension.getActiveWorkspaceFolder()?.uri.path !== target.getWorkspaceFolder().uri.path) {
+                return false;
+            }
+            let isActive = Configs.getWorkspaceConfigs().activeTargets?.indexOf(target.getName()) !== -1;
             return isActive;
         });
     }
@@ -30,26 +33,21 @@ export class Targets {
         return Targets.items;
     }
 
-    public static findByName(name: string): TargetInterface {
-        let targets = Targets.items.filter((target) => {
-            return target.getName().indexOf(name) !== -1;
-        });
-
-        return targets[0];
-    }
-
-    public static getTargetInstance(targetConfig: TargetOptionsInterface): TargetInterface | null {
+    public static getTargetInstance(
+        targetConfig: TargetOptionsInterface,
+        workspaceFolder: vscode.WorkspaceFolder
+    ): TargetInterface | null {
         switch (targetConfig.type) {
             case TargetTypes.ftp:
                 if (!targetConfig.port) {
                     targetConfig.port = 21;
                 }
-                return new FTP(targetConfig);
+                return new FTP(targetConfig, workspaceFolder);
             case TargetTypes.sftp:
                 if (!targetConfig.port) {
                     targetConfig.port = 22;
                 }
-                return new SFTP(targetConfig);
+                return new SFTP(targetConfig, workspaceFolder);
             default:
                 Extension.showErrorMessage("[PRO Deployer] Target '" + targetConfig.name + "' have invalid type");
                 break;
@@ -59,7 +57,7 @@ export class Targets {
     }
 
     public static getRelativePath(targetConfig: TargetOptionsInterface, uri: vscode.Uri): string {
-        let relativePath = vscode.workspace.asRelativePath(uri);
+        let relativePath = vscode.workspace.asRelativePath(uri, false);
         let baseDir = targetConfig.baseDir ?? "/";
 
         if (baseDir.startsWith("/") === true) {

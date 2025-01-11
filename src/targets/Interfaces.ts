@@ -38,6 +38,7 @@ export interface TargetInterface {
     destroy(): void;
     getName(): string;
     getQueue(): Queue.Queue<QueueTask>;
+    getWorkspaceFolder(): vscode.WorkspaceFolder;
 }
 
 export enum TargetTypes {

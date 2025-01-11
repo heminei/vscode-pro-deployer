@@ -9,7 +9,7 @@ import { MemFS } from "./fileSystemProvider";
 import { GitExtension, Status } from "./typings/git";
 
 export class Extension {
-    public static mode = "prod";
+    public static mode = process.env.APP_MODE ?? "prod";
     public static extensionContext: vscode.ExtensionContext;
     public static outputChannel: vscode.OutputChannel | null;
     public static statusBarItem: vscode.StatusBarItem | null;
@@ -23,9 +23,17 @@ export class Extension {
         Extension.appendLineToOutputChannel("PRO deployer activated");
     }
 
-    public static getActiveWorkspaceFolderPath(): string | null {
+    public static getActiveWorkspaceFolder(): vscode.WorkspaceFolder | null {
+        const activeEditor = vscode.window.activeTextEditor;
+        if (activeEditor) {
+            const activeDocumentUri = activeEditor.document.uri;
+            const workspaceFolder = vscode.workspace.getWorkspaceFolder(activeDocumentUri);
+            if (workspaceFolder) {
+                return workspaceFolder;
+            }
+        }
         if (vscode.workspace.workspaceFolders) {
-            return vscode.workspace.workspaceFolders[0].uri.path;
+            return vscode.workspace.workspaceFolders[0];
         }
         return null;
     }
@@ -88,17 +96,17 @@ export class Extension {
             Extension.appendLineToOutputChannel("File ignored (config file)");
             return true;
         }
-        if (micromatch.isMatch(relativePath, Configs.getConfigs().ignore)) {
+        if (micromatch.isMatch(relativePath, Configs.getWorkspaceConfigs(uri).ignore)) {
             Extension.appendLineToOutputChannel("File/folder ignored (ignore option): " + relativePath);
             return true;
         }
-        if (Configs.getConfigs().include.length > 0) {
-            if (micromatch.isMatch(relativePath, Configs.getConfigs().include) === false) {
+        if (Configs.getWorkspaceConfigs(uri).include.length > 0) {
+            if (micromatch.isMatch(relativePath, Configs.getWorkspaceConfigs(uri).include) === false) {
                 Extension.appendLineToOutputChannel("File/folder not included (include option): " + relativePath);
                 return true;
             }
         }
-        if (Configs.getConfigs().checkGitignore) {
+        if (Configs.getWorkspaceConfigs(uri).checkGitignore) {
             if (fs.existsSync(Configs.getGitignoreFile().path)) {
                 if (parser.compile(fs.readFileSync(Configs.getGitignoreFile().path).toString()).denies(relativePath)) {
                     Extension.appendLineToOutputChannel("File ignored (.gitignore): " + relativePath);
@@ -121,8 +129,8 @@ export function activate(context: vscode.ExtensionContext) {
         Targets.destroyAllTargets();
         Extension.statusBarItem?.dispose();
 
-        Configs.getConfigs().targets?.forEach((targetConfig) => {
-            let target = Targets.getTargetInstance(targetConfig);
+        Configs.getAllTargetOptions().forEach((targetOption) => {
+            let target = Targets.getTargetInstance(targetOption.options, targetOption.workspaceFolder);
             if (target) {
                 Targets.add(target);
             }
@@ -264,7 +272,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     fileWatcher.onDidCreate((uri) => {
         // console.log("onDidCreate", uri);
-        if (Configs.getConfigs().uploadOnSave === false) {
+        if (Configs.getWorkspaceConfigs(uri).uploadOnSave === false) {
             return;
         }
         if (Extension.isUriIgnored(uri)) {
@@ -276,7 +284,11 @@ export function activate(context: vscode.ExtensionContext) {
                     if (isFile) {
                         target.upload(uri);
                     } else {
-                        vscode.workspace.findFiles(vscode.workspace.asRelativePath(uri) + "/**/*").then((files) => {
+                        const includePattern = new vscode.RelativePattern(
+                            target.getWorkspaceFolder(),
+                            vscode.workspace.asRelativePath(uri, false) + "/**/*"
+                        );
+                        vscode.workspace.findFiles(includePattern).then((files) => {
                             files.forEach((uri) => {
                                 target.upload(uri);
                             });
@@ -288,7 +300,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
     fileWatcher.onDidChange((uri) => {
         // console.log("onDidChange", uri);
-        if (Configs.getConfigs().uploadOnSave === false) {
+        if (Configs.getWorkspaceConfigs(uri).uploadOnSave === false) {
             return;
         }
         if (Extension.isUriIgnored(uri)) {
@@ -300,7 +312,11 @@ export function activate(context: vscode.ExtensionContext) {
                     if (isFile) {
                         target.upload(uri);
                     } else {
-                        vscode.workspace.findFiles(vscode.workspace.asRelativePath(uri) + "/**/*").then((files) => {
+                        const includePattern = new vscode.RelativePattern(
+                            target.getWorkspaceFolder(),
+                            vscode.workspace.asRelativePath(uri, false) + "/**/*"
+                        );
+                        vscode.workspace.findFiles(includePattern).then((files) => {
                             files.forEach((uri) => {
                                 target.upload(uri);
                             });
@@ -312,7 +328,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
     fileWatcher.onDidDelete((uri) => {
         // console.log("onDidDelete", uri);
-        if (Configs.getConfigs().autoDelete === false) {
+        if (Configs.getWorkspaceConfigs(uri).autoDelete === false) {
             return;
         }
         if (Extension.isUriIgnored(uri)) {
@@ -358,6 +374,7 @@ export function activate(context: vscode.ExtensionContext) {
             Targets.getItems().forEach((item) => {
                 item.getQueue().end();
             });
+            vscode.window.showInformationMessage("All actions have been canceled");
         })
     );
     context.subscriptions.push(
@@ -401,15 +418,26 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            const items = Targets.getItems().map((item) => {
-                return item.getName();
-            });
+            const items = Targets.getItems()
+                .filter((item) => {
+                    if (Extension.getActiveWorkspaceFolder()?.uri.path !== item.getWorkspaceFolder().uri.path) {
+                        return false;
+                    }
+                    return true;
+                })
+                .map((item) => {
+                    return {
+                        label: item.getName(),
+                        description: item.getWorkspaceFolder().name,
+                        target: item,
+                    };
+                });
             vscode.window.showQuickPick(items).then((value) => {
                 if (!value) {
                     return;
                 }
 
-                const target = Targets.findByName(value);
+                const target = value.target;
 
                 target.connect(() => {
                     URIs.forEach((uri) => {
@@ -417,13 +445,15 @@ export function activate(context: vscode.ExtensionContext) {
                             if (isFile) {
                                 target.upload(uri);
                             } else {
-                                vscode.workspace
-                                    .findFiles(vscode.workspace.asRelativePath(uri) + "/**/*")
-                                    .then((files) => {
-                                        files.forEach((uri) => {
-                                            target.upload(uri);
-                                        });
+                                const includePattern = new vscode.RelativePattern(
+                                    target.getWorkspaceFolder(),
+                                    vscode.workspace.asRelativePath(uri, false) + "/**/*"
+                                );
+                                vscode.workspace.findFiles(includePattern).then((files) => {
+                                    files.forEach((uri) => {
+                                        target.upload(uri);
                                     });
+                                });
                             }
                         });
                     });
@@ -484,13 +514,15 @@ export function activate(context: vscode.ExtensionContext) {
                             if (isFile) {
                                 target.upload(uri);
                             } else {
-                                vscode.workspace
-                                    .findFiles(vscode.workspace.asRelativePath(uri) + "/**/*")
-                                    .then((files) => {
-                                        files.forEach((uri) => {
-                                            target.upload(uri);
-                                        });
+                                const includePattern = new vscode.RelativePattern(
+                                    target.getWorkspaceFolder(),
+                                    vscode.workspace.asRelativePath(uri, false) + "/**/*"
+                                );
+                                vscode.workspace.findFiles(includePattern).then((files) => {
+                                    files.forEach((uri) => {
+                                        target.upload(uri);
                                     });
+                                });
                             }
                         });
                     });
@@ -500,32 +532,46 @@ export function activate(context: vscode.ExtensionContext) {
     );
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.upload-all-open", () => {
-            const files = vscode.workspace.textDocuments.filter((textDocument) => {
-                if (textDocument.uri.scheme === "git") {
-                    return false;
-                }
-                if (textDocument.uri.scheme === "output") {
-                    return false;
-                }
-                if (textDocument.uri.scheme === "vscode-scm") {
-                    return false;
-                }
-                return true;
+            const files = [] as vscode.Uri[];
+            vscode.window.tabGroups.all.forEach((tabGroup) => {
+                tabGroup.tabs.forEach((tab) => {
+                    if (tab.input instanceof vscode.TabInputText || tab.input instanceof vscode.TabInputNotebook) {
+                        files.push(tab.input.uri);
+                    }
+                    if (
+                        tab.input instanceof vscode.TabInputTextDiff ||
+                        tab.input instanceof vscode.TabInputNotebookDiff
+                    ) {
+                        files.push(tab.input.original);
+                    }
+                });
             });
 
             const items = Targets.getItems().map((item) => {
-                return item.getName();
+                return {
+                    label: item.getName(),
+                    description: item.getWorkspaceFolder().name,
+                    target: item,
+                };
             });
 
             vscode.window.showQuickPick(items).then((value) => {
                 if (!value) {
                     return;
                 }
-                const target = Targets.findByName(value);
+                const target = value.target;
 
                 target.connect(() => {
-                    files.forEach((textDocument) => {
-                        target.upload(textDocument.uri);
+                    files.forEach((uri) => {
+                        if (
+                            target.getWorkspaceFolder().uri.path !== vscode.workspace.getWorkspaceFolder(uri)?.uri.path
+                        ) {
+                            Extension.appendLineToOutputChannel(
+                                "[INFO] File ignored, because is not from workspace. File: " + uri.path
+                            );
+                            return;
+                        }
+                        target.upload(uri);
                     });
                 });
             });
@@ -558,17 +604,29 @@ export function activate(context: vscode.ExtensionContext) {
             });
 
             const items = Targets.getItems().map((item) => {
-                return item.getName();
+                return {
+                    label: item.getName(),
+                    description: item.getWorkspaceFolder().name,
+                    target: item,
+                };
             });
 
             vscode.window.showQuickPick(items).then((value) => {
                 if (!value) {
                     return;
                 }
-                const target = Targets.findByName(value);
+                const target = value.target;
 
                 target.connect(() => {
                     URIs.forEach((uri) => {
+                        if (
+                            target.getWorkspaceFolder().uri.path !== vscode.workspace.getWorkspaceFolder(uri)?.uri.path
+                        ) {
+                            Extension.appendLineToOutputChannel(
+                                "[INFO] File ignored, because is not from workspace. File: " + uri.path
+                            );
+                            return;
+                        }
                         target.upload(uri);
                     });
                 });
@@ -677,14 +735,18 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             const items = Targets.getItems().map((item) => {
-                return item.getName();
+                return {
+                    label: item.getName(),
+                    description: item.getWorkspaceFolder().name,
+                    target: item,
+                };
             });
             vscode.window.showQuickPick(items).then((value) => {
                 if (!value) {
                     return;
                 }
 
-                const target = Targets.findByName(value);
+                const target = value.target;
 
                 target.connect(() => {
                     URIs.forEach((uri) => {
@@ -702,35 +764,37 @@ export function activate(context: vscode.ExtensionContext) {
     );
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.download-all-files", () => {
-            const workspaceFolderPath = Extension.getActiveWorkspaceFolderPath();
+            const workspaceFolder = Extension.getActiveWorkspaceFolder();
 
-            if (!workspaceFolderPath) {
+            if (!workspaceFolder) {
                 Extension.showErrorMessage("Can't find workspace folder");
                 return;
             }
 
-            const workspaceFolderPathUri = vscode.Uri.file(workspaceFolderPath);
-
             const items = Targets.getItems().map((item) => {
-                return item.getName();
+                return {
+                    label: item.getName(),
+                    description: item.getWorkspaceFolder().name,
+                    target: item,
+                };
             });
             vscode.window.showQuickPick(items).then((value) => {
                 if (!value) {
                     return;
                 }
 
-                const target = Targets.findByName(value);
+                const target = value.target;
 
                 target.connect(() => {
-                    target.downloadDir(workspaceFolderPathUri);
+                    target.downloadDir(workspaceFolder.uri);
                 });
             });
         })
     );
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.diff-with", (...args) => {
-            const workspaceFolderPath = Extension.getActiveWorkspaceFolderPath();
-            if (!workspaceFolderPath) {
+            const workspaceFolder = Extension.getActiveWorkspaceFolder();
+            if (!workspaceFolder) {
                 Extension.showErrorMessage("Can't find workspace folder");
                 return;
             }
@@ -776,14 +840,18 @@ export function activate(context: vscode.ExtensionContext) {
             const uri = URIs[0];
 
             const items = Targets.getItems().map((item) => {
-                return item.getName();
+                return {
+                    label: item.getName(),
+                    description: item.getWorkspaceFolder().name,
+                    target: item,
+                };
             });
             vscode.window.showQuickPick(items).then((value) => {
                 if (!value) {
                     return;
                 }
 
-                const target = Targets.findByName(value);
+                const target = value.target;
 
                 target.connect(() => {
                     Extension.isLikeFile(uri).then((isFile) => {
