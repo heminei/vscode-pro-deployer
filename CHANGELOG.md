@@ -4,6 +4,10 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [3.0.1]
+
+- fixed bug: when in one of the folders of the workspace is missing pro-deployer.json file, the extension doesn't load the configuration.
+
 ## [3.0.0]
 
 This is beta version. Please report any bugs.
