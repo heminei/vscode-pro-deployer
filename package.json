@@ -71,6 +71,11 @@
                 "title": "Download All Files From...",
                 "category": "PRO Deployer"
             },
+             {
+                "command": "pro-deployer.delete",
+                "title": "Delete",
+                "category": "PRO Deployer"
+            },
             {
                 "command": "pro-deployer.show-output-channel",
                 "title": "Show Output Channel",
@@ -145,6 +150,10 @@
                 },
                 {
                     "command": "pro-deployer.download-from",
+                    "group": "pro-deployer"
+                },
+                 {
+                    "command": "pro-deployer.delete",
                     "group": "pro-deployer"
                 },
                 {

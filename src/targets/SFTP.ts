@@ -130,10 +130,11 @@ export class SFTP extends Target implements TargetInterface {
                 Extension.appendLineToOutputChannel("[INFO][SFTP] Start uploading file: " + relativePath);
                 this.sftp.fastPut(uri.fsPath, this.options.dir + relativePath, (err: any) => {
                     if (err) {
-                        if (err.message.indexOf("No such file") !== -1) {
+                        if (err.code === 2) {
+                            // No such file or directory
                             const dir = this.options.dir + path.dirname(relativePath);
 
-                            Extension.appendLineToOutputChannel("[INFO][SFTP] Missing directory: " + dir);
+                            Extension.appendLineToOutputChannel("[INFO][SFTP] Missing directory: " + dir + err.code);
                             this.mkdir(dir).then(
                                 () => {
                                     Extension.appendLineToOutputChannel(
@@ -196,9 +197,9 @@ export class SFTP extends Target implements TargetInterface {
                     Extension.appendLineToOutputChannel("[ERROR][SFTP] SFTP client missing");
                     return;
                 }
-                this.sftp.unlink(this.options.dir + relativePath, (err) => {
+                this.sftp.unlink(this.options.dir + relativePath, (err: any) => {
                     if (err) {
-                        if (err.message.indexOf("No such file") !== -1) {
+                        if (err.code === 2) {
                             Extension.appendLineToOutputChannel(
                                 "[INFO][SFTP] File deleted (No such file): '" + this.options.dir + relativePath
                             );
@@ -408,7 +409,8 @@ export class SFTP extends Target implements TargetInterface {
             Extension.appendLineToOutputChannel("[INFO][SFTP] Try to create dir: " + dir);
             this.sftp.mkdir(dir, (err: any) => {
                 if (err) {
-                    if (err.message.indexOf("No such file") !== -1) {
+                    if (err.code === 2) {
+                        // No such file or directory
                         this.mkdir(path.dirname(dir)).then(
                             () => {
                                 this.sftp?.mkdir(dir, (err: any) => {

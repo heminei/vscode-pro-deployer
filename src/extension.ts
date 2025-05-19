@@ -792,6 +792,66 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
     context.subscriptions.push(
+        vscode.commands.registerCommand("pro-deployer.delete", (...args) => {
+            const URIs = [] as vscode.Uri[];
+            args.forEach((arg) => {
+                if (arg instanceof vscode.Uri) {
+                    const checkExist = URIs.find((item) => {
+                        return item.toString() === arg.toString();
+                    });
+                    if (!checkExist) {
+                        URIs.push(arg);
+                    }
+                }
+                if ("resourceUri" in arg) {
+                    const checkExist = URIs.find((item) => {
+                        return item.toString() === arg.resourceUri.toString();
+                    });
+                    if (!checkExist) {
+                        URIs.push(arg.resourceUri);
+                    }
+                }
+                if (Array.isArray(arg)) {
+                    arg.forEach((uri) => {
+                        if (uri instanceof vscode.Uri) {
+                            const checkExist = URIs.find((item) => {
+                                return item.toString() === uri.toString();
+                            });
+                            if (!checkExist) {
+                                URIs.push(uri);
+                            }
+                        }
+                    });
+                }
+            });
+            if (URIs.length === 0 && vscode.window.activeTextEditor?.document.uri) {
+                URIs.push(vscode.window.activeTextEditor?.document.uri);
+            }
+            if (URIs.length === 0) {
+                Extension.showErrorMessage("Can't find files for downloading");
+                return;
+            }
+            if (Targets.getActive().length === 0) {
+                Extension.showErrorMessage("No active targets");
+                return;
+            }
+
+            const target = Targets.getActive()[0];
+
+            target.connect(() => {
+                URIs.forEach((uri) => {
+                    Extension.isLikeFile(uri).then((isFile) => {
+                        if (isFile) {
+                            target.delete(uri);
+                        } else {
+                            target.deleteDir(uri);
+                        }
+                    });
+                });
+            });
+        })
+    );
+    context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.diff-with", (...args) => {
             const workspaceFolder = Extension.getActiveWorkspaceFolder();
             if (!workspaceFolder) {
