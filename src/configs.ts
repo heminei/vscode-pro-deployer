@@ -170,7 +170,7 @@ export class Configs {
             });
         });
 
-        Promise.all(promises).then(() => {
+        Promise.allSettled(promises).finally(() => {
             cb();
         });
 

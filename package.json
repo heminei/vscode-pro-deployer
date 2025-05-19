@@ -2,7 +2,7 @@
     "name": "pro-deployer",
     "displayName": "PRO Deployer - SFTP/FTP deployer",
     "description": "PRO Deployer - Simple and powerful SFTP/FTP deployer",
-    "version": "3.0.0",
+    "version": "3.0.1",
     "engines": {
         "vscode": "^1.92.0"
     },
@@ -193,7 +193,7 @@
         "gitignore-parser": "^0.0.2",
         "micromatch": "^4.0.8",
         "path": "^0.12.7",
-        "ssh2": "^1.15.0"
+        "ssh2": "^1.16.0"
     },
     "devDependencies": {
         "@types/ftp": "^0.3.36",
@@ -201,7 +201,7 @@
         "@types/micromatch": "^4.0.9",
         "@types/mocha": "^10.0.7",
         "@types/node": "20.x",
-        "@types/ssh2": "^1.15.1",
+        "@types/ssh2": "^1.15.5",
         "@types/vscode": "^1.92.0",
         "@typescript-eslint/eslint-plugin": "^7.14.1",
         "@typescript-eslint/parser": "^7.11.0",
