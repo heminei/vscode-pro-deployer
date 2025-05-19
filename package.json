@@ -195,7 +195,8 @@
         "pretest": "npm run compile && npm run lint",
         "lint": "eslint src --ext ts",
         "test": "vscode-test",
-        "vsce": "vsce"
+        "vsce": "vsce",
+        "build": "vsce package --allow-package-all-secrets"
     },
     "dependencies": {
         "ftp": "^0.3.10",
