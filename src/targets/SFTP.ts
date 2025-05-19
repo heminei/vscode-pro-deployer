@@ -103,7 +103,9 @@ export class SFTP extends Target implements TargetInterface {
             return;
         }
 
-        Extension.appendLineToOutputChannel("[INFO][SFTP] Connecting to: " + this.options.host);
+        Extension.appendLineToOutputChannel(
+            "[INFO][SFTP] Connecting to: " + this.options.host + ":" + this.options.port
+        );
         this.client.connect({
             host: this.options.host,
             port: this.options.port,
@@ -134,7 +136,7 @@ export class SFTP extends Target implements TargetInterface {
                             // No such file or directory
                             const dir = this.options.dir + path.dirname(relativePath);
 
-                            Extension.appendLineToOutputChannel("[INFO][SFTP] Missing directory: " + dir + err.code);
+                            Extension.appendLineToOutputChannel("[INFO][SFTP] Missing directory: " + dir);
                             this.mkdir(dir).then(
                                 () => {
                                     Extension.appendLineToOutputChannel(
@@ -249,6 +251,17 @@ export class SFTP extends Target implements TargetInterface {
                     }
                     vscode.workspace.fs.writeFile(destination!, handle).then(
                         () => {
+                            // Check if the file is unsaved in the editor
+                            const unsaveFile = vscode.workspace.textDocuments.find(
+                                (doc) => doc.uri.fsPath === destination?.fsPath
+                            );
+                            if (unsaveFile && unsaveFile.isDirty) {
+                                const edit = new vscode.WorkspaceEdit();
+                                const fullRange = new vscode.Range(0, 0, unsaveFile.lineCount, 0); // Range covering the entire document
+                                edit.replace(uri, fullRange, handle.toString());
+                                vscode.workspace.applyEdit(edit);
+                                unsaveFile.save();
+                            }
                             Extension.appendLineToOutputChannel("[INFO][SFTP] File downloaded: '" + relativePath);
                             cb();
                             resolve(uri);

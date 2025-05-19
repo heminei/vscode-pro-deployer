@@ -17,7 +17,10 @@ PRO Deployer - Simple and powerful SFTP/FTP deployer. Support **concurrency** up
 - support status bar item
 - support quick pick dialog
 - download files or folders from targets
+- delete files or folders from targets
 - diff tool: compare local file with remote file
+- upload all open files
+- upload all uncommitted files
 - support workspaces! Now you can have multiple Pro Deployer configurations for each workspace. The first workspace folder is used for default configuration for UI/UX settings. All other settings will be used according to the active workspace. When use `pro-deployer.upload-all-open` or `pro-deployer.download-all-files` will be uploaded/downloaded files from the selected target workspace.
 
 ## Donation
@@ -93,6 +96,8 @@ This extension contributes the following commands:
 - `pro-deployer.upload-to`: upload file or folder to selected target
 - `pro-deployer.download`: download file or folder
 - `pro-deployer.download-from`: download file or folder from selected target
+- `pro-deployer.delete`: delete file or folder from active targets
+- `pro-deployer.delete-from`: delete file or folder from selected target
 - `pro-deployer.diff-with`: compare local file with remote file
 - `pro-deployer.upload-all-open`: upload all open files
 - `pro-deployer.show-output-channel`: show output channel of PRO Deployer

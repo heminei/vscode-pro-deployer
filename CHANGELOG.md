@@ -4,6 +4,16 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [3.1.1]
+
+- fixed bug: Issue #43 - If file unsaved, downloading file does nothing
+
+## [3.1.0]
+
+- added a new command: `pro-deployer.delete` - this command allows you to delete a file or folder from the target.
+- added a new command: `pro-deployer.delete-from` - this command allows you to delete a file or folder from the selected target.
+- fixed bugs when upload file from non existing folder in FTP/SFTP servers.
+
 ## [3.0.1]
 
 - fixed bug: when in one of the folders of the workspace is missing pro-deployer.json file, the extension doesn't load the configuration.

@@ -105,7 +105,7 @@ export class FTP extends Target implements TargetInterface {
         if (!this.options.transferDataType) {
             this.options.transferDataType = "binary";
         }
-        Extension.appendLineToOutputChannel("INFO][FTP] Connecting to: " + this.options.host);
+        Extension.appendLineToOutputChannel("INFO][FTP] Connecting to: " + this.options.host + ":" + this.options.port);
         this.client.connect({
             host: this.options.host,
             port: this.options.port,
@@ -133,52 +133,43 @@ export class FTP extends Target implements TargetInterface {
                 Extension.appendLineToOutputChannel("[INFO][FTP] Start uploading file: " + relativePath);
                 this.client.put(uri.fsPath, this.options.dir + relativePath, (err) => {
                     if (err) {
-                        if (
-                            err.message.indexOf("No such file") !== -1 ||
-                            err.message.indexOf("Couldn't open the file or directory") !== -1
-                        ) {
-                            const dir = this.options.dir + path.dirname(relativePath);
-                            Extension.appendLineToOutputChannel("[INFO][FTP] Missing directory: " + dir);
-                            this.mkdir(dir).then(
-                                () => {
-                                    Extension.appendLineToOutputChannel(
-                                        "[INFO][FTP] The directory is created: " + dir + "."
-                                    );
-                                    this.client.put(uri.fsPath, this.options.dir + relativePath, (err) => {
-                                        if (err) {
-                                            cb(err);
-                                            reject(err);
-                                            return;
-                                        }
-                                        cb();
-                                        resolve(uri);
-                                    });
-                                },
-                                (reason) => {
-                                    cb(reason);
-                                    reject(reason);
-                                }
-                            );
-                            return;
-                        }
-                        // if (err.message.indexOf("read ECONNRESET") !== -1 && attempts < 3) {
-                        //     this.upload(uri, attempts + 1).then(
-                        //         (value) => {
-                        //             resolve(value);
-                        //         },
-                        //         (reason) => {
-                        //             reject(reason);
-                        //         }
-                        //     );
-                        //     return;
-                        // }
+                        // if (
+                        //     err.message.indexOf("No such file") !== -1 ||
+                        //     err.message.indexOf("Couldn't open the file or directory") !== -1
+                        // ) {
                         Extension.appendLineToOutputChannel(
                             "[ERROR][FTP] Can't upload file: " + uri.path + ". Error: " + err.message
                         );
-                        cb(err.message);
-                        reject(err.message);
+
+                        const dir = this.options.dir + path.dirname(relativePath);
+                        this.mkdir(dir).then(
+                            () => {
+                                this.client.put(uri.fsPath, this.options.dir + relativePath, (err) => {
+                                    if (err) {
+                                        cb(err);
+                                        reject(err);
+                                        return;
+                                    }
+                                    cb();
+                                    resolve(uri);
+                                    Extension.appendLineToOutputChannel(
+                                        "[INFO][FTP] File: '" +
+                                            relativePath +
+                                            "' is uploaded to: '" +
+                                            this.options.dir +
+                                            relativePath +
+                                            "'"
+                                    );
+                                });
+                            },
+                            (reason) => {
+                                cb(reason);
+                                reject(reason);
+                            }
+                        );
                         return;
                     }
+
                     Extension.appendLineToOutputChannel(
                         "[INFO][FTP] File: '" +
                             relativePath +
@@ -254,6 +245,17 @@ export class FTP extends Target implements TargetInterface {
                         (buffer) => {
                             vscode.workspace.fs.writeFile(destination!, buffer).then(
                                 () => {
+                                    // Check if the file is unsaved in the editor
+                                    const unsaveFile = vscode.workspace.textDocuments.find(
+                                        (doc) => doc.uri.fsPath === destination?.fsPath
+                                    );
+                                    if (unsaveFile && unsaveFile.isDirty) {
+                                        const edit = new vscode.WorkspaceEdit();
+                                        const fullRange = new vscode.Range(0, 0, unsaveFile.lineCount, 0); // Range covering the entire document
+                                        edit.replace(uri, fullRange, buffer.toString());
+                                        vscode.workspace.applyEdit(edit);
+                                        unsaveFile.save();
+                                    }
                                     Extension.appendLineToOutputChannel(
                                         "[INFO][FTP] File downloaded: '" + relativePath
                                     );
@@ -360,7 +362,7 @@ export class FTP extends Target implements TargetInterface {
             }
 
             const job = <QueueTask>((cb) => {
-                this.client.rmdir(this.options.dir + relativePath, (err) => {
+                this.client.rmdir(this.options.dir + relativePath, true, (err) => {
                     if (err) {
                         cb(err.message);
                         reject(err.message);
@@ -393,13 +395,16 @@ export class FTP extends Target implements TargetInterface {
                     reject(err.message);
                     return;
                 }
+                Extension.appendLineToOutputChannel("[INFO][FTP] The directory is created: " + dir + ".");
                 resolve("");
             });
         });
+
+        this.creatingDirectories.set(dir, promise);
+
         promise.finally(() => {
             this.creatingDirectories.delete(dir);
         });
-        this.creatingDirectories.set(dir, promise);
 
         return promise;
     }
