@@ -29,6 +29,8 @@ export interface TargetOptionsInterface {
     privateKey?: string;
     passphrase?: string;
     transferDataType?: "binary" | "ascii";
+    useAuthAgent?: boolean;
+    authAgentPath?: string;
 }
 
 export interface TargetInterface {

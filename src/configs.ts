@@ -27,6 +27,8 @@ export class Configs {
                 baseDir: "/",
                 privateKey: null,
                 passphrase: null,
+                useAuthAgent: true,
+                authAgentPath: "/path/to/auth/agent",
             },
             {
                 name: "My FTP",

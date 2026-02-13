@@ -175,6 +175,8 @@ This allows you to use the same configuration template across multiple workspace
 | `baseDir` | string | `"/"` | Local base directory for uploads |
 | `privateKey` | string | `null` | Path to private key file for key-based authentication |
 | `passphrase` | string | `null` | Passphrase for encrypted private key |
+| `useAuthAgent` | bool | `false` | Enable authentication over SSH auth agent |
+| `authAgentPath` | string | `${env.SSH_AUTH_SOCK}` | Path of the SSH agent socket |
 
 ## Extension Commands
 
