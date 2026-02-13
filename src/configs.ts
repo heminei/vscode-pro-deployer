@@ -29,6 +29,7 @@ export class Configs {
                 passphrase: null,
                 useAuthAgent: false,
                 authAgentPath: null,
+                keepaliveIntervalMs: 10000,
             },
             {
                 name: "My FTP",
@@ -41,6 +42,7 @@ export class Configs {
                 baseDir: "/",
                 transferDataType: "binary",
                 secure: false,
+                keepaliveIntervalMs: 10000,
             },
         ] as TargetOptionsInterface[],
     };

@@ -18,8 +18,38 @@ export class SFTP extends Target implements TargetInterface {
     private isConnecting: boolean = false;
     private queue: Queue<QueueTask> = new Queue<QueueTask>();
     private creatingDirectories: Map<string, Promise<string>> = new Map([]);
+    private keepaliveLogTimer: NodeJS.Timeout | null = null;
 
-    constructor(private options: TargetOptionsInterface, workspaceFolder: vscode.WorkspaceFolder) {
+    private startKeepaliveLogging(): void {
+        this.stopKeepaliveLogging();
+        if (!this.options.keepaliveIntervalMs) {
+            Extension.appendLineToOutputChannel(
+                "[INFO][SFTP] Keepalive logging is disabled (keepaliveIntervalMs is not set)",
+            );
+            return;
+        }
+        const intervalMs = this.options.keepaliveIntervalMs;
+        this.keepaliveLogTimer = setInterval(() => {
+            if (!this.isConnected) {
+                return;
+            }
+            Extension.appendLineToOutputChannel("[INFO][SFTP] Keepalive request (intervalMs: " + intervalMs + ")");
+        }, intervalMs);
+        // Avoid keeping the extension host alive just because of the timer
+        (this.keepaliveLogTimer as any).unref?.();
+    }
+
+    private stopKeepaliveLogging(): void {
+        if (this.keepaliveLogTimer) {
+            clearInterval(this.keepaliveLogTimer);
+            this.keepaliveLogTimer = null;
+        }
+    }
+
+    constructor(
+        private options: TargetOptionsInterface,
+        workspaceFolder: vscode.WorkspaceFolder,
+    ) {
         super(workspaceFolder);
         this.setMaxListeners(10000);
 
@@ -36,15 +66,17 @@ export class SFTP extends Target implements TargetInterface {
         this.client.on("close", () => {
             this.isConnected = false;
             this.isConnecting = false;
+            this.stopKeepaliveLogging();
             Extension.appendLineToOutputChannel("[INFO][SFTP] The connection is closed");
         });
         this.client.on("end", () => {
             this.isConnected = false;
             this.isConnecting = false;
+            this.stopKeepaliveLogging();
             Extension.appendLineToOutputChannel("[INFO][SFTP] The connection is ended");
         });
         Extension.appendLineToOutputChannel(
-            "[INFO][FTP] target is created. Workspace: " + this.getWorkspaceFolder().name + ". Name: " + this.name
+            "[INFO][FTP] target is created. Workspace: " + this.getWorkspaceFolder().name + ". Name: " + this.name,
         );
     }
 
@@ -77,6 +109,7 @@ export class SFTP extends Target implements TargetInterface {
 
                     this.isConnected = true;
                     this.isConnecting = false;
+                    this.startKeepaliveLogging();
                     this.emit("ready", this);
                 } else {
                     Extension.appendLineToOutputChannel("[ERROR][SFTP] Can't convert ssh2 to sftp");
@@ -86,6 +119,7 @@ export class SFTP extends Target implements TargetInterface {
         this.client.once("error", (error: any) => {
             this.isConnected = false;
             this.isConnecting = false;
+            this.stopKeepaliveLogging();
             this.emit("error", error);
         });
 
@@ -101,7 +135,7 @@ export class SFTP extends Target implements TargetInterface {
             Extension.appendLineToOutputChannel("[INFO][SFTP] Keyboard-interactive prompts count: " + prompts.length);
             prompts.forEach((prompt, index) => {
                 Extension.appendLineToOutputChannel(
-                    "[INFO][SFTP] Prompt " + index + ": " + prompt.prompt + " (echo: " + prompt.echo + ")"
+                    "[INFO][SFTP] Prompt " + index + ": " + prompt.prompt + " (echo: " + prompt.echo + ")",
                 );
             });
 
@@ -114,7 +148,7 @@ export class SFTP extends Target implements TargetInterface {
                 }
                 // For other prompts, return empty string
                 Extension.appendLineToOutputChannel(
-                    "[WARN][SFTP] Unknown prompt, sending empty response: " + prompt.prompt
+                    "[WARN][SFTP] Unknown prompt, sending empty response: " + prompt.prompt,
                 );
                 return "";
             });
@@ -127,6 +161,9 @@ export class SFTP extends Target implements TargetInterface {
         }
         if (this.options.dir[this.options.dir.length - 1] !== "/") {
             this.options.dir += "/";
+        }
+        if (!this.options.keepaliveIntervalMs) {
+            this.options.keepaliveIntervalMs = 10000;
         }
 
         let privateKey = undefined;
@@ -156,7 +193,7 @@ export class SFTP extends Target implements TargetInterface {
             }
         } catch (err: any) {
             Extension.appendLineToOutputChannel(
-                "[ERROR][SFTP] Can't read private key file: " + this.options.privateKey + ". Error: " + err.message
+                "[ERROR][SFTP] Can't read private key file: " + this.options.privateKey + ". Error: " + err.message,
             );
             Extension.showErrorMessage("[SFTP] Can't read private key file: " + this.options.privateKey);
             return;
@@ -166,14 +203,14 @@ export class SFTP extends Target implements TargetInterface {
         Extension.appendLineToOutputChannel("[INFO][SFTP] === Authentication Configuration ===");
         Extension.appendLineToOutputChannel("[INFO][SFTP] Username: " + this.options.user);
         Extension.appendLineToOutputChannel(
-            "[INFO][SFTP] Password provided: " + (this.options.password ? "Yes" : "No")
+            "[INFO][SFTP] Password provided: " + (this.options.password ? "Yes" : "No"),
         );
         Extension.appendLineToOutputChannel("[INFO][SFTP] Private key provided: " + (privateKey ? "Yes" : "No"));
         Extension.appendLineToOutputChannel(
-            "[INFO][SFTP] Passphrase provided: " + (this.options.passphrase ? "Yes" : "No")
+            "[INFO][SFTP] Passphrase provided: " + (this.options.passphrase ? "Yes" : "No"),
         );
         Extension.appendLineToOutputChannel(
-            "[INFO][SFTP] Connecting to: " + this.options.host + ":" + this.options.port
+            "[INFO][SFTP] Connecting to: " + this.options.host + ":" + this.options.port,
         );
         if (!this.options.authAgentPath) {
             this.options.authAgentPath = process.env.SSH_AUTH_SOCK || undefined;
@@ -181,14 +218,13 @@ export class SFTP extends Target implements TargetInterface {
         if (!this.options.useAuthAgent) {
             this.options.useAuthAgent = false;
         }
-        if(this.options.useAuthAgent && !this.options.authAgentPath) {
-            Extension.appendLineToOutputChannel(
-                "[WARN][SFTP] Auth agent is enabled but no auth agent path is set."
-            );
+        if (this.options.useAuthAgent && !this.options.authAgentPath) {
+            Extension.appendLineToOutputChannel("[WARN][SFTP] Auth agent is enabled but no auth agent path is set.");
             this.options.useAuthAgent = false;
         }
         Extension.appendLineToOutputChannel(
-            "[INFO][SFTP] Auth agent: " + (this.options.useAuthAgent ? ("Enabled (" + this.options.authAgentPath + ")") : "Disabled")
+            "[INFO][SFTP] Auth agent: " +
+                (this.options.useAuthAgent ? "Enabled (" + this.options.authAgentPath + ")" : "Disabled"),
         );
         this.client.connect({
             host: this.options.host,
@@ -198,7 +234,9 @@ export class SFTP extends Target implements TargetInterface {
             privateKey: privateKey,
             passphrase: this.options.passphrase,
             tryKeyboard: true, // Enable keyboard-interactive fallback
-            agent: this.options.useAuthAgent ? (this.options.authAgentPath) : undefined,
+            agent: this.options.useAuthAgent ? this.options.authAgentPath : undefined,
+            keepaliveInterval: this.options.keepaliveIntervalMs,
+            keepaliveCountMax: this.options.keepaliveIntervalMs ? 3 : undefined,
         });
     }
     upload(uri: vscode.Uri): Promise<vscode.Uri> {
@@ -226,7 +264,7 @@ export class SFTP extends Target implements TargetInterface {
                             this.mkdir(dir).then(
                                 () => {
                                     Extension.appendLineToOutputChannel(
-                                        "[INFO][SFTP] The directory is created: " + dir + "."
+                                        "[INFO][SFTP] The directory is created: " + dir + ".",
                                     );
                                     this.sftp?.fastPut(uri.fsPath, this.options.dir + relativePath, (err: any) => {
                                         if (err) {
@@ -241,13 +279,13 @@ export class SFTP extends Target implements TargetInterface {
                                 (reason: Error) => {
                                     cb(reason);
                                     reject(reason);
-                                }
+                                },
                             );
                             return;
                         }
 
                         Extension.appendLineToOutputChannel(
-                            "[ERROR][SFTP] Can't upload file: " + uri.path + ". Error: " + err.message
+                            "[ERROR][SFTP] Can't upload file: " + uri.path + ". Error: " + err.message,
                         );
                         cb(err.message);
                         reject(err.message);
@@ -259,7 +297,7 @@ export class SFTP extends Target implements TargetInterface {
                             "' is uploaded to: '" +
                             this.options.dir +
                             relativePath +
-                            "'"
+                            "'",
                     );
                     cb();
                     resolve(uri);
@@ -289,7 +327,7 @@ export class SFTP extends Target implements TargetInterface {
                     if (err) {
                         if (err.code === 2) {
                             Extension.appendLineToOutputChannel(
-                                "[INFO][SFTP] File deleted (No such file): '" + this.options.dir + relativePath
+                                "[INFO][SFTP] File deleted (No such file): '" + this.options.dir + relativePath,
                             );
                             cb();
                             resolve(uri);
@@ -339,7 +377,7 @@ export class SFTP extends Target implements TargetInterface {
                         () => {
                             // Check if the file is unsaved in the editor
                             const unsaveFile = vscode.workspace.textDocuments.find(
-                                (doc) => doc.uri.fsPath === destination?.fsPath
+                                (doc) => doc.uri.fsPath === destination?.fsPath,
                             );
                             if (unsaveFile && unsaveFile.isDirty) {
                                 const edit = new vscode.WorkspaceEdit();
@@ -355,7 +393,7 @@ export class SFTP extends Target implements TargetInterface {
                         (reason) => {
                             cb(reason);
                             reject(reason);
-                        }
+                        },
                     );
                 });
             });
@@ -392,7 +430,7 @@ export class SFTP extends Target implements TargetInterface {
                         this.sftp?.readdir(this.options.dir + dir, (err, list) => {
                             if (err) {
                                 Extension.appendLineToOutputChannel(
-                                    "[ERROR][SFTP] Can't read dir: '" + dir + "'. Error: " + err
+                                    "[ERROR][SFTP] Can't read dir: '" + dir + "'. Error: " + err,
                                 );
                                 cb(err);
                                 readDirReject(err);
@@ -410,7 +448,7 @@ export class SFTP extends Target implements TargetInterface {
                                                 baseDir +
                                                 dir +
                                                 "/" +
-                                                item.filename
+                                                item.filename,
                                         );
                                         this.sftp?.stat(this.options.dir + dir + "/" + item.filename, (err, stats) => {
                                             if (err) {
@@ -421,7 +459,7 @@ export class SFTP extends Target implements TargetInterface {
                                                         "/" +
                                                         item.filename +
                                                         "'. Error: " +
-                                                        err
+                                                        err,
                                                 );
                                                 statReject(err);
                                                 return;
@@ -442,7 +480,7 @@ export class SFTP extends Target implements TargetInterface {
                                                 statResolve(file);
                                             });
                                         });
-                                    })
+                                    }),
                                 );
                             });
 
@@ -544,7 +582,7 @@ export class SFTP extends Target implements TargetInterface {
                                     }
                                     resolve("");
                                 });
-                            }
+                            },
                         );
                         return;
                     }
@@ -578,6 +616,7 @@ export class SFTP extends Target implements TargetInterface {
 
     destroy() {
         if (this.isConnected) {
+            this.stopKeepaliveLogging();
             this.client.end();
             this.queue.end();
             Extension.appendLineToOutputChannel("[INFO][SFTP] The connection is destroyed");

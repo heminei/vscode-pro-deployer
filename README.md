@@ -68,7 +68,7 @@ PRO Deployer supports VS Code-like variables in configuration values. This is us
 **Supported Variables:**
 
 | Variable | Description |
-|----------|-------------|
+| -------- | ----------- |
 | `${workspaceFolder}` | The path of the workspace folder |
 | `${workspaceFolderBasename}` | The name of the workspace folder without path |
 | `${userHome}` | The path of the user's home folder |
@@ -123,7 +123,10 @@ This allows you to use the same configuration template across multiple workspace
             "dir": "/public_html",
             "baseDir": "/", //This option is useful when you want to upload files from a subdirectory of the project
             "privateKey": null,
-            "passphrase": null
+            "passphrase": null,
+            "useAuthAgent": false, //Set to true to enable authentication over SSH agent
+            "authAgentPath": null, //Path of the SSH agent socket. If not set, it falls back to ${env:SSH_AUTH_SOCK}
+            "keepaliveIntervalMs": 10000 //Optional keepalive interval (ms)
         },
         {
             "name": "My FTP",
@@ -138,7 +141,8 @@ This allows you to use the same configuration template across multiple workspace
             "secure": false, //Set to true for explicit FTPS (AUTH TLS) or "implicit" for implicit FTPS (port 990)
             "secureOptions": {
                 "rejectUnauthorized": false //Set to true to reject unauthorized certificates
-            }
+            },
+            "keepaliveIntervalMs": 10000 //Optional keepalive interval (ms)
         }
     ]
 }
@@ -148,7 +152,7 @@ This allows you to use the same configuration template across multiple workspace
 ## FTP Target Options
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| ------ | ---- | ------- | ----------- |
 | `name` | string | - | Name of the target (required) |
 | `type` | string | - | Must be `"ftp"` (required) |
 | `host` | string | - | FTP server hostname (required) |
@@ -160,11 +164,12 @@ This allows you to use the same configuration template across multiple workspace
 | `transferDataType` | string | `"binary"` | Transfer mode: `"binary"` or `"ascii"` |
 | `secure` | boolean \| string | `false` | `true` for explicit FTPS (AUTH TLS), `"implicit"` for implicit FTPS |
 | `secureOptions.rejectUnauthorized` | boolean | `false` | Whether to reject unauthorized SSL certificates |
+| `keepaliveIntervalMs` | number | - | Keepalive interval in milliseconds |
 
 ## SFTP Target Options
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| ------ | ---- | ------- | ----------- |
 | `name` | string | - | Name of the target (required) |
 | `type` | string | - | Must be `"sftp"` (required) |
 | `host` | string | - | SFTP server hostname (required) |
@@ -177,6 +182,7 @@ This allows you to use the same configuration template across multiple workspace
 | `passphrase` | string | `null` | Passphrase for encrypted private key |
 | `useAuthAgent` | bool | `false` | Enable authentication over SSH auth agent |
 | `authAgentPath` | string | `${env.SSH_AUTH_SOCK}` | Path of the SSH agent socket |
+| `keepaliveIntervalMs` | number | - | Keepalive interval in milliseconds |
 
 ## Extension Commands
 

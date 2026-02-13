@@ -16,6 +16,32 @@ export class FTP extends Target implements TargetInterface {
     private isConnecting: boolean = false;
     private queue: Queue<QueueTask> = new Queue<QueueTask>();
     private creatingDirectories: Map<string, Promise<string>> = new Map([]);
+    private keepaliveLogTimer: NodeJS.Timeout | null = null;
+
+    private startKeepaliveLogging(): void {
+        this.stopKeepaliveLogging();
+        if (!this.options.keepaliveIntervalMs) {
+            return;
+        }
+        const intervalMs = this.options.keepaliveIntervalMs;
+        this.keepaliveLogTimer = setInterval(() => {
+            if (!this.isConnected) {
+                return;
+            }
+            Extension.appendLineToOutputChannel(
+                "[INFO][FTP] Keepalive request (intervalMs: " + intervalMs + ")"
+            );
+        }, intervalMs);
+        // Avoid keeping the extension host alive just because of the timer
+        (this.keepaliveLogTimer as any).unref?.();
+    }
+
+    private stopKeepaliveLogging(): void {
+        if (this.keepaliveLogTimer) {
+            clearInterval(this.keepaliveLogTimer);
+            this.keepaliveLogTimer = null;
+        }
+    }
 
     constructor(private options: TargetOptionsInterface, workspaceFolder: vscode.WorkspaceFolder) {
         super(workspaceFolder);
@@ -37,11 +63,13 @@ export class FTP extends Target implements TargetInterface {
         this.client.on("close", () => {
             this.isConnected = false;
             this.isConnecting = false;
+            this.stopKeepaliveLogging();
             Extension.appendLineToOutputChannel("[INFO][FTP] The connection is closed");
         });
         this.client.on("end", () => {
             this.isConnected = false;
             this.isConnecting = false;
+            this.stopKeepaliveLogging();
             Extension.appendLineToOutputChannel("[INFO][FTP] The connection is ended");
         });
 
@@ -88,11 +116,13 @@ export class FTP extends Target implements TargetInterface {
         this.client.once("ready", () => {
             this.isConnected = true;
             this.isConnecting = false;
+            this.startKeepaliveLogging();
             this.emit("ready", this);
         });
         this.client.once("error", (error: any) => {
             this.isConnected = false;
             this.isConnecting = false;
+            this.stopKeepaliveLogging();
             this.emit("error", error);
         });
 
@@ -101,6 +131,9 @@ export class FTP extends Target implements TargetInterface {
         }
         if (this.options.dir[this.options.dir.length - 1] !== "/") {
             this.options.dir += "/";
+        }
+        if (!this.options.keepaliveIntervalMs) {
+            this.options.keepaliveIntervalMs = 10000;
         }
         if (!this.options.transferDataType) {
             this.options.transferDataType = "binary";
@@ -120,6 +153,7 @@ export class FTP extends Target implements TargetInterface {
             user: this.options.user,
             password: this.options.password,
             secure: this.options.secure,
+            keepalive: this.options.keepaliveIntervalMs,
             // debug: (message) => {
             //     console.log("debug", message);
             // },

@@ -4,6 +4,10 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [3.5.0]
+
+- added a new target option: `keepaliveIntervalMs` (FTP/SFTP) to send periodic keepalive packets and reduce idle disconnects.
+
 ## [3.4.0]
 
 - added support for SSH agent authentication for SFTP targets:

@@ -31,6 +31,9 @@ export interface TargetOptionsInterface {
     transferDataType?: "binary" | "ascii";
     useAuthAgent?: boolean;
     authAgentPath?: string;
+
+    // Optional keepalive interval in milliseconds
+    keepaliveIntervalMs?: number;
 }
 
 export interface TargetInterface {
