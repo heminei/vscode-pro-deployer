@@ -27,8 +27,8 @@ export class Configs {
                 baseDir: "/",
                 privateKey: null,
                 passphrase: null,
-                useAuthAgent: true,
-                authAgentPath: "/path/to/auth/agent",
+                useAuthAgent: false,
+                authAgentPath: null,
             },
             {
                 name: "My FTP",
@@ -119,7 +119,7 @@ export class Configs {
         }
 
         const configFile = vscode.Uri.file(
-            Extension.getActiveWorkspaceFolder()?.uri.path + "/.vscode/pro-deployer.json"
+            Extension.getActiveWorkspaceFolder()?.uri.path + "/.vscode/pro-deployer.json",
         );
 
         vscode.workspace.fs.stat(configFile).then(
@@ -138,9 +138,9 @@ export class Configs {
                         },
                         (reason) => {
                             Extension.showErrorMessage("Can't generate config file. The file can't be written!");
-                        }
+                        },
                     );
-            }
+            },
         );
     }
     public static init(cb: Function) {
@@ -214,14 +214,15 @@ export class Configs {
                 }
 
                 Extension.appendLineToOutputChannel(
-                    "[INFO] The config file is updated: " + JSON.stringify(this.configs)
+                    "[INFO] The config file is updated: " + JSON.stringify(this.configs),
                 );
                 cb();
             }
 
             if (
                 this.getWorkspaceConfigFiles().findIndex(
-                    (file) => vscode.workspace.asRelativePath(e.uri.path) === vscode.workspace.asRelativePath(file.path)
+                    (file) =>
+                        vscode.workspace.asRelativePath(e.uri.path) === vscode.workspace.asRelativePath(file.path),
                 ) > -1
             ) {
                 this.workspaceConfigs = {};
@@ -259,7 +260,7 @@ export class Configs {
                         this.workspaceConfigs[file.path] = configs;
 
                         Extension.appendLineToOutputChannel(
-                            "[INFO] The config file is loaded: " + JSON.stringify(this.configs)
+                            "[INFO] The config file is loaded: " + JSON.stringify(this.configs),
                         );
                     });
                 });

@@ -4,6 +4,12 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [3.4.0]
+
+- added support for SSH agent authentication for SFTP targets:
+  - new options: `useAuthAgent` and `authAgentPath`
+  - when `authAgentPath` is not set, it falls back to `${env:SSH_AUTH_SOCK}`
+
 ## [3.3.0]
 
 - added support for dynamic configuration variables in config values:
