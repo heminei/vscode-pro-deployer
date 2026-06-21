@@ -183,7 +183,8 @@ export class FTP extends Target implements TargetInterface {
                             "[ERROR][FTP] Can't upload file: " + uri.path + ". Error: " + err.message
                         );
 
-                        const dir = this.options.dir + path.dirname(relativePath);
+                        const dirName = path.dirname(relativePath);
+                        const dir = this.options.dir + (dirName === "." ? "" : dirName);
                         this.mkdir(dir).then(
                             () => {
                                 this.client.put(uri.fsPath, this.options.dir + relativePath, (err) => {
