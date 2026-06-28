@@ -213,11 +213,6 @@ export class Configs {
                 const workspaceFolder = vscode.workspace.getWorkspaceFolder(e.uri);
                 if (workspaceFolder && this.configs) {
                     this.configs = VariableResolver.resolveObject(this.configs, workspaceFolder);
-                }
-
-                // Keep the workspaceConfigs map (used by getAllTargetOptions) in sync synchronously,
-                // otherwise cb() rebuilds targets from the previous save's data (lags one save behind).
-                if (workspaceFolder) {
                     this.workspaceConfigs[workspaceFolder.uri.path + "/.vscode/pro-deployer.json"] = this.configs;
                 }
 
