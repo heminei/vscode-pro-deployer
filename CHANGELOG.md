@@ -4,6 +4,12 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [3.5.1]
+
+- fixed redundant synchronization logic for `workspaceConfigs`.
+- fixed upload-recovery behavior that triggered a spurious `mkdir .` for root-level files.
+- fixed configuration reload timing so updates apply immediately after save.
+
 ## [3.5.0]
 
 - added a new target option: `keepaliveIntervalMs` (FTP/SFTP) to send periodic keepalive packets and reduce idle disconnects.
