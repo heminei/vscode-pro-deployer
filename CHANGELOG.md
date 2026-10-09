@@ -4,6 +4,20 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [3.6.0]
+
+- fixed bug: `pro-deployer.cancel-all-actions` did not stop a running directory download - it restarted a few seconds later and had to be pressed several times.
+- fixed queue corruption when a task finished after the queue was canceled.
+- fixed bug: directory downloads on Windows sent the local workspace path to the remote server, and downloading the `baseDir` folder itself appended the local path to the remote path (#67).
+
+- added commands `Download (With Ignore List)`, `Download From... (With Ignore List)` and `Download All Files (Filter Ignored) From...`: ignored files are skipped and ignored directories are not traversed (#68).
+- added option `respectIgnoreOnDownload` (default `false`): applies `ignore`/`include`/`checkGitignore` to directory downloads.
+- added `${secret:NAME}` support for target `password` and `passphrase`, backed by the OS keychain (VS Code SecretStorage).
+- added commands `Set Secret (keychain)` and `Delete Secret (keychain)`.
+- passwords and passphrases are now masked in the output channel.
+- config loading is unified and a config reload no longer exposes a half-loaded state.
+- added remote directory browser: pick a target's `dir` from the remote file system via the `Browse remote...` CodeLens above `dir` in `.vscode/pro-deployer.json` or the `Browse Remote Directory...` command.
+
 ## [3.5.1]
 
 - fixed redundant synchronization logic for `workspaceConfigs`.

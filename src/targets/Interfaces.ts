@@ -7,6 +7,7 @@ export interface ConfigsInterface {
     autoDelete?: boolean;
     uploadOnSave?: boolean;
     checkGitignore?: boolean;
+    respectIgnoreOnDownload?: boolean;
     concurrency?: number;
     activeTargets?: string[];
     targets?: TargetOptionsInterface[];
@@ -39,14 +40,20 @@ export interface TargetOptionsInterface {
 export interface TargetInterface {
     connect(cb: Function, error?: Function | undefined): void;
     upload(uri: vscode.Uri): Promise<vscode.Uri>;
-    download(uri: vscode.Uri, destination?: vscode.Uri): Promise<vscode.Uri>;
-    downloadDir(uri: vscode.Uri): Promise<vscode.Uri>;
+    download(uri: vscode.Uri, destination?: vscode.Uri, checkIgnore?: boolean): Promise<vscode.Uri>;
+    downloadDir(uri: vscode.Uri, checkIgnore?: boolean): Promise<vscode.Uri>;
+    listDir(remotePath: string): Promise<RemoteDirEntry[]>;
     delete(uri: vscode.Uri): Promise<vscode.Uri>;
     deleteDir(uri: vscode.Uri): Promise<vscode.Uri>;
     destroy(): void;
     getName(): string;
     getQueue(): Queue.Queue<QueueTask>;
     getWorkspaceFolder(): vscode.WorkspaceFolder;
+}
+
+export interface RemoteDirEntry {
+    name: string;
+    isDirectory: boolean;
 }
 
 export enum TargetTypes {

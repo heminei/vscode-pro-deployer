@@ -1,6 +1,6 @@
 import Client = require("ftp");
 import { Extension } from "../extension";
-import { QueueTask, TargetInterface, TargetOptionsInterface } from "./Interfaces";
+import { QueueTask, RemoteDirEntry, TargetInterface, TargetOptionsInterface } from "./Interfaces";
 import * as path from "path";
 import * as vscode from "vscode";
 import { Queue } from "../Queue";
@@ -258,7 +258,7 @@ export class FTP extends Target implements TargetInterface {
             this.queue.push(job);
         });
     }
-    download(uri: vscode.Uri, destination?: vscode.Uri): Promise<vscode.Uri> {
+    download(uri: vscode.Uri, destination?: vscode.Uri, checkIgnore: boolean = false): Promise<vscode.Uri> {
         const relativePath = Targets.getRelativePath(this.options, uri);
 
         if (destination === undefined) {
@@ -268,6 +268,11 @@ export class FTP extends Target implements TargetInterface {
         return new Promise<vscode.Uri>((resolve, reject) => {
             if (!this.isConnected) {
                 reject("Not connected");
+                return;
+            }
+            if (checkIgnore && Extension.isUriIgnored(uri, false, true)) {
+                Extension.appendLineToOutputChannel("[INFO][FTP] Skipped ignored file: '" + relativePath);
+                resolve(uri);
                 return;
             }
 
@@ -321,6 +326,7 @@ export class FTP extends Target implements TargetInterface {
             job.uri = uri;
             job.isFile = true;
             job.action = "download";
+            job.cancel = () => reject("Canceled");
             this.queue.push(job);
         });
     }
@@ -337,11 +343,33 @@ export class FTP extends Target implements TargetInterface {
         });
     }
 
-    downloadDir(uri: vscode.Uri): Promise<vscode.Uri> {
-        var relativePath = Targets.getRelativePath(this.options, uri);
-        if (relativePath === Extension.getActiveWorkspaceFolder()?.uri.path) {
-            relativePath = "";
-        }
+    listDir(remotePath: string): Promise<RemoteDirEntry[]> {
+        return new Promise<RemoteDirEntry[]>((resolve, reject) => {
+            if (!this.isConnected) {
+                reject("Not connected");
+                return;
+            }
+            this.client.list(remotePath, (err, list) => {
+                if (err) {
+                    Extension.appendLineToOutputChannel(
+                        "[ERROR][FTP] Can't list dir: '" + remotePath + "'. Error: " + err
+                    );
+                    reject(err);
+                    return;
+                }
+                resolve(
+                    list
+                        .filter((item) => item.name !== "." && item.name !== "..")
+                        // FTP can't cheaply resolve symlinks, so they are offered as directories
+                        .map((item) => ({ name: item.name, isDirectory: item.type === "d" || item.type === "l" }))
+                );
+            });
+        });
+    }
+
+    downloadDir(uri: vscode.Uri, checkIgnore: boolean = false): Promise<vscode.Uri> {
+        const relativePath = Targets.getRelativePath(this.options, uri);
+        const workspaceUri = this.getWorkspaceFolder().uri;
 
         // Get baseDir for constructing local paths
         let baseDir = this.options.baseDir ?? "";
@@ -357,11 +385,16 @@ export class FTP extends Target implements TargetInterface {
                 reject("Not connected");
                 return;
             }
+            const generation = this.queue.generation;
             const job = <QueueTask>((cb) => {
                 const readDir = (dir: string): Promise<any> => {
                     return new Promise<any>((readDirResolve, readDirReject) => {
+                        if (this.queue.generation !== generation) {
+                            readDirResolve([]);
+                            return;
+                        }
                         Extension.appendLineToOutputChannel("[INFO][FTP] Start read dir: '" + dir);
-                        this.client?.list(this.options.dir + dir, (err, list) => {
+                        this.client?.list(path.posix.join(this.options.dir || "/", dir), (err, list) => {
                             if (err) {
                                 Extension.appendLineToOutputChannel(
                                     "[ERROR][FTP] Can't read dir: '" + dir + "'. Error: " + err
@@ -370,18 +403,23 @@ export class FTP extends Target implements TargetInterface {
                                 readDirReject(err);
                                 return;
                             }
+                            if (this.queue.generation !== generation) {
+                                readDirResolve([]);
+                                return;
+                            }
                             Extension.appendLineToOutputChannel("[INFO][FTP] Dir files: " + list.length);
                             let downloadOrReadPromises: Promise<vscode.Uri>[] = [];
 
                             list.forEach((item) => {
-                                const file = vscode.Uri.file(
-                                    Extension.getActiveWorkspaceFolder()?.uri.path +
-                                        "/" +
-                                        baseDir +
-                                        dir +
-                                        "/" +
-                                        item.name
-                                );
+                                const file = vscode.Uri.joinPath(workspaceUri, baseDir, dir, item.name);
+                                const isDirectory = item.type === "d";
+
+                                if ((item.type === "-" || isDirectory) && checkIgnore && Extension.isUriIgnored(file, isDirectory, true)) {
+                                    Extension.appendLineToOutputChannel(
+                                        "[INFO][FTP] Skipped ignored: '" + path.posix.join(dir, item.name)
+                                    );
+                                    return;
+                                }
 
                                 if (item.type === "-") {
                                     downloadOrReadPromises.push(this.download(file));
@@ -390,9 +428,11 @@ export class FTP extends Target implements TargetInterface {
                                 }
                             });
 
-                            Promise.all(downloadOrReadPromises).finally(() => {
-                                readDirResolve(list);
-                            });
+                            // download() rejects when canceled; that must not surface as unhandled
+                            Promise.all(downloadOrReadPromises).then(
+                                () => readDirResolve(list),
+                                () => readDirResolve(list)
+                            );
                         });
                     });
                 };
@@ -406,6 +446,7 @@ export class FTP extends Target implements TargetInterface {
             job.uri = uri;
             job.isFile = true;
             job.action = "downloadDir";
+            job.cancel = () => resolve(uri);
             this.queue.push(job);
         });
     }

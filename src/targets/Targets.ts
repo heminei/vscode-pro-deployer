@@ -58,17 +58,29 @@ export class Targets {
     }
 
     public static getRelativePath(targetConfig: TargetOptionsInterface, uri: vscode.Uri): string {
-        let relativePath = vscode.workspace.asRelativePath(uri, false);
-        let baseDir = targetConfig.baseDir ?? "/";
+        const normalize = (value: string) => value.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 
-        if (baseDir.startsWith("/") === true) {
-            baseDir = baseDir.substring(1);
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri) ?? Extension.getActiveWorkspaceFolder();
+        if (workspaceFolder) {
+            // On Windows asRelativePath returns the absolute path for the workspace root
+            if (
+                normalize(uri.fsPath).toLowerCase() === normalize(workspaceFolder.uri.fsPath).toLowerCase() ||
+                normalize(uri.path) === normalize(workspaceFolder.uri.path)
+            ) {
+                return "";
+            }
         }
-        if (baseDir.endsWith("/") === false) {
-            baseDir = baseDir + "/";
-        }
-        if (relativePath.startsWith(baseDir) === true) {
-            relativePath = relativePath.substring(baseDir.length);
+
+        let relativePath = normalize(vscode.workspace.asRelativePath(uri, false));
+        const baseDir = normalize(targetConfig.baseDir ?? "");
+
+        if (baseDir.length > 0) {
+            if (relativePath === baseDir) {
+                return "";
+            }
+            if (relativePath.startsWith(baseDir + "/")) {
+                relativePath = relativePath.substring(baseDir.length + 1);
+            }
         }
 
         return relativePath;

@@ -73,6 +73,7 @@ Config file location: `.vscode/pro-deployer.json` in each workspace folder
     ignore: string[],          // Micromatch patterns (relative to workspace)
     include: string[],         // Optional: whitelist patterns (empty = all)
     checkGitignore: boolean,   // Parse .gitignore for ignore rules
+    respectIgnoreOnDownload: boolean, // Apply ignore rules to directory downloads (default false)
     targets: [{
         name: string,
         type: "ftp" | "sftp",
@@ -96,6 +97,8 @@ Config file location: `.vscode/pro-deployer.json` in each workspace folder
 6. **SSH Keys**: SFTP `privateKey` path is read synchronously on connect - verify file exists before attempting connection
 
 7. **Workspace Folder Resolution**: Commands like `upload-all-open` and `download-all-files` filter files by target's workspace folder to prevent cross-workspace operations
+
+8. **Secrets**: `${secret:NAME}` in `password`/`passphrase` is resolved asynchronously by `SecretManager` (VS Code SecretStorage) in `Configs.resolveSecrets()`, after the sync `VariableResolver`. Never log configs with `JSON.stringify`; use `Configs.stringifyRedacted()`. Clear-text passwords must keep working.
 
 ## Extension Points
 

@@ -1,11 +1,14 @@
 import * as vscode from "vscode";
 import { Configs } from "./configs";
 import { Targets } from "./targets/Targets";
+import { SecretManager } from "./SecretManager";
 import fs = require("fs");
 import micromatch = require("micromatch");
 import parser = require("gitignore-parser");
 import { QueueTask } from "./targets/Interfaces";
 import { MemFS } from "./fileSystemProvider";
+import { RemoteBrowser } from "./RemoteBrowser";
+import { DirCodeLensProvider } from "./DirCodeLensProvider";
 import { GitExtension, Status } from "./typings/git";
 
 export class Extension {
@@ -85,31 +88,52 @@ export class Extension {
         });
     }
 
-    public static isUriIgnored(uri: vscode.Uri): boolean {
+    // Command args carry this marker when the "filtered" command variants delegate to the base commands.
+    public static readonly filterIgnoredArg = { filterIgnored: true };
+
+    public static getDownloadIgnoreMode(args: any[], target: { getWorkspaceFolder(): vscode.WorkspaceFolder }) {
+        const explicit = args.some((arg) => arg === Extension.filterIgnoredArg);
+        const configured = Configs.getWorkspaceConfigs(target.getWorkspaceFolder().uri)?.respectIgnoreOnDownload === true;
+        // A file picked explicitly is only filtered by the explicit command; the config option affects bulk downloads.
+        return { forFile: explicit, forDir: explicit || configured };
+    }
+
+    public static isUriIgnored(uri: vscode.Uri, isDirectory: boolean = false, quiet: boolean = false): boolean {
         const relativePath = vscode.workspace.asRelativePath(uri.path);
+        const log = (message: string) => {
+            if (!quiet) {
+                Extension.appendLineToOutputChannel(message);
+            }
+        };
 
         if (uri.scheme === "git") {
-            Extension.appendLineToOutputChannel("File ignored (git): " + relativePath);
+            log("File ignored (git): " + relativePath);
             return true;
         }
         if (uri.path === Configs.getConfigFile().path) {
-            Extension.appendLineToOutputChannel("File ignored (config file)");
+            log("File ignored (config file)");
             return true;
         }
-        if (micromatch.isMatch(relativePath, Configs.getWorkspaceConfigs(uri).ignore, { dot: true })) {
-            Extension.appendLineToOutputChannel("File/folder ignored (ignore option): " + relativePath);
+        const ignorePatterns = Configs.getWorkspaceConfigs(uri).ignore;
+        // Patterns like "logs/**/*" only match children, so probe the directory with a fake child.
+        if (
+            micromatch.isMatch(relativePath, ignorePatterns, { dot: true }) ||
+            (isDirectory && micromatch.isMatch(relativePath + "/__dir__", ignorePatterns, { dot: true }))
+        ) {
+            log("File/folder ignored (ignore option): " + relativePath);
             return true;
         }
-        if (Configs.getWorkspaceConfigs(uri).include.length > 0) {
+        // A directory can't be tested against include patterns (e.g. "src/**/*.ts"), its files are tested instead.
+        if (!isDirectory && Configs.getWorkspaceConfigs(uri).include.length > 0) {
             if (micromatch.isMatch(relativePath, Configs.getWorkspaceConfigs(uri).include, { dot: true }) === false) {
-                Extension.appendLineToOutputChannel("File/folder not included (include option): " + relativePath);
+                log("File/folder not included (include option): " + relativePath);
                 return true;
             }
         }
         if (Configs.getWorkspaceConfigs(uri).checkGitignore) {
             if (fs.existsSync(Configs.getGitignoreFile().path)) {
                 if (parser.compile(fs.readFileSync(Configs.getGitignoreFile().path).toString()).denies(relativePath)) {
-                    Extension.appendLineToOutputChannel("File ignored (.gitignore): " + relativePath);
+                    log("File ignored (.gitignore): " + relativePath);
                     return true;
                 }
             }
@@ -365,8 +389,65 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
     context.subscriptions.push(
+        vscode.commands.registerCommand("pro-deployer.set-secret", async () => {
+            const name = (
+                await vscode.window.showInputBox({
+                    title: "PRO Deployer: Set Secret",
+                    prompt: "Secret name, used in the config as ${secret:name}",
+                    validateInput: (value) =>
+                        SecretManager.isValidName(value.trim()) ? undefined : "Use a name without spaces, $, { or }",
+                })
+            )?.trim();
+            if (!name) {
+                return;
+            }
+            const value = await vscode.window.showInputBox({
+                title: "PRO Deployer: Set Secret",
+                prompt: "Value for '" + name + "' (stored in the OS keychain)",
+                password: true,
+            });
+            if (value === undefined) {
+                return;
+            }
+            await SecretManager.set(name, value);
+            await Configs.reload();
+            vscode.window.showInformationMessage(
+                "Secret saved. Use \"password\": \"${secret:" + name + "}\" in the config."
+            );
+        })
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand("pro-deployer.delete-secret", async () => {
+            const names = SecretManager.getNames();
+            if (names.length === 0) {
+                vscode.window.showInformationMessage("No secrets are stored.");
+                return;
+            }
+            const name = await vscode.window.showQuickPick(names, { title: "PRO Deployer: Delete Secret" });
+            if (!name) {
+                return;
+            }
+            await SecretManager.delete(name);
+            await Configs.reload();
+            vscode.window.showInformationMessage("Secret '" + name + "' deleted.");
+        })
+    );
+    context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.show-output-channel", () => {
             Extension.outputChannel?.show(true);
+        })
+    );
+    context.subscriptions.push(
+        vscode.languages.registerCodeLensProvider(
+            { scheme: "file", pattern: "**/.vscode/pro-deployer.json" },
+            new DirCodeLensProvider()
+        )
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand("pro-deployer.browse-remote-dir", (...args) => {
+            const configFile = args[0] instanceof vscode.Uri ? args[0] : undefined;
+            const targetIndex = configFile && typeof args[1] === "number" ? args[1] : undefined;
+            return RemoteBrowser.run(configFile, targetIndex);
         })
     );
     context.subscriptions.push(
@@ -700,18 +781,24 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             const target = Targets.getActive()[0];
+            const ignoreMode = Extension.getDownloadIgnoreMode(args, target);
 
             target.connect(() => {
                 URIs.forEach((uri) => {
                     Extension.isLikeFile(uri).then((isFile) => {
                         if (isFile) {
-                            target.download(uri);
+                            target.download(uri, undefined, ignoreMode.forFile);
                         } else {
-                            target.downloadDir(uri);
+                            target.downloadDir(uri, ignoreMode.forDir);
                         }
                     });
                 });
             });
+        })
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand("pro-deployer.download-filtered", (...args) => {
+            return vscode.commands.executeCommand("pro-deployer.download", ...args, Extension.filterIgnoredArg);
         })
     );
     context.subscriptions.push(
@@ -768,14 +855,15 @@ export function activate(context: vscode.ExtensionContext) {
                 }
 
                 const target = value.target;
+                const ignoreMode = Extension.getDownloadIgnoreMode(args, target);
 
                 target.connect(() => {
                     URIs.forEach((uri) => {
                         Extension.isLikeFile(uri).then((isFile) => {
                             if (isFile) {
-                                target.download(uri);
+                                target.download(uri, undefined, ignoreMode.forFile);
                             } else {
-                                target.downloadDir(uri);
+                                target.downloadDir(uri, ignoreMode.forDir);
                             }
                         });
                     });
@@ -784,7 +872,12 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
     context.subscriptions.push(
-        vscode.commands.registerCommand("pro-deployer.download-all-files", () => {
+        vscode.commands.registerCommand("pro-deployer.download-from-filtered", (...args) => {
+            return vscode.commands.executeCommand("pro-deployer.download-from", ...args, Extension.filterIgnoredArg);
+        })
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand("pro-deployer.download-all-files", (...args) => {
             const workspaceFolder = Extension.getActiveWorkspaceFolder();
 
             if (!workspaceFolder) {
@@ -805,11 +898,17 @@ export function activate(context: vscode.ExtensionContext) {
                 }
 
                 const target = value.target;
+                const ignoreMode = Extension.getDownloadIgnoreMode(args, target);
 
                 target.connect(() => {
-                    target.downloadDir(workspaceFolder.uri);
+                    target.downloadDir(workspaceFolder.uri, ignoreMode.forDir);
                 });
             });
+        })
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand("pro-deployer.download-all-files-filtered", () => {
+            return vscode.commands.executeCommand("pro-deployer.download-all-files", Extension.filterIgnoredArg);
         })
     );
     context.subscriptions.push(

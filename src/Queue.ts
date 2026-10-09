@@ -2,12 +2,15 @@ import { EventEmitter } from "events";
 
 export interface Task<T> extends EventEmitter {
     (cb: Function): Promise<T> | void;
+    // Called when the queue is ended while the task is pending or running
+    cancel?: () => void;
 }
 
 export class Queue<T extends Task<any>> extends EventEmitter {
     public concurrency: number = 0;
     public autostart: boolean = false;
     private running = false;
+    private _generation = 0;
 
     private pendingTasks: T[] = [];
     private executionTasks: T[] = [];
@@ -15,6 +18,11 @@ export class Queue<T extends Task<any>> extends EventEmitter {
 
     constructor() {
         super();
+    }
+
+    // Incremented by end(); long-running tasks compare it to detect cancellation
+    public get generation(): number {
+        return this._generation;
     }
 
     public getPendingTasks(): T[] {
@@ -77,12 +85,15 @@ export class Queue<T extends Task<any>> extends EventEmitter {
     }
 
     public end(): this {
+        const cancelled = [...this.pendingTasks, ...this.executionTasks];
+        this._generation++;
         this.running = false;
         this.pendingTasks = [];
         this.executionTasks = [];
         this.executedTasks = [];
 
         this.emit("end");
+        cancelled.forEach((task) => task.cancel?.());
 
         return this;
     }
@@ -91,23 +102,28 @@ export class Queue<T extends Task<any>> extends EventEmitter {
         this.pendingTasks.splice(this.pendingTasks.indexOf(task), 1);
         this.executionTasks.push(task);
 
-        const cb = (error?: any) => {
-            if (error) {
-                this.emit("task.error", task, error);
-                this.executionTasks.splice(this.executionTasks.indexOf(task), 1);
-                this.executedTasks.push(task);
-                if (this.running) {
-                    this.start();
-                }
-                return this;
+        const finish = () => {
+            const index = this.executionTasks.indexOf(task);
+            // Not found means the queue was ended while the task was running
+            if (index === -1) {
+                return;
             }
-
-            this.emit("task.success", task);
-            this.executionTasks.splice(this.executionTasks.indexOf(task), 1);
+            this.executionTasks.splice(index, 1);
             this.executedTasks.push(task);
             if (this.running) {
                 this.start();
             }
+        };
+
+        const cb = (error?: any) => {
+            if (error) {
+                this.emit("task.error", task, error);
+                finish();
+                return this;
+            }
+
+            this.emit("task.success", task);
+            finish();
         };
 
         this.emit("task.start", task);
@@ -121,13 +137,7 @@ export class Queue<T extends Task<any>> extends EventEmitter {
                     this.emit("task.error", task, reason);
                 }
             );
-            promise.finally(() => {
-                this.executionTasks.splice(this.executionTasks.indexOf(task), 1);
-                this.executedTasks.push(task);
-                if (this.running) {
-                    this.start();
-                }
-            });
+            promise.finally(finish);
         }
         return this;
     }

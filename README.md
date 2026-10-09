@@ -23,6 +23,7 @@ PRO Deployer - Simple and powerful SFTP/FTP deployer. Support **concurrency** up
 - upload all uncommitted files
 - support workspaces! Now you can have multiple Pro Deployer configurations for each workspace. The first workspace folder is used for default configuration for UI/UX settings. All other settings will be used according to the active workspace. When use `pro-deployer.upload-all-open` or `pro-deployer.download-all-files` will be uploaded/downloaded files from the selected target workspace.
 - upload to specific target via keybinding
+- browse the remote file system to pick a target's `dir` (CodeLens above `dir` in the config or `PRO Deployer: Browse Remote Directory...`)
 - **dynamic configuration variables** - use `${workspaceFolderBasename}`, `${workspaceFolder}`, `${userHome}`, `${env:VAR}` in configuration values
 
 ## Donation
@@ -74,6 +75,7 @@ PRO Deployer supports VS Code-like variables in configuration values. This is us
 | `${userHome}` | The path of the user's home folder |
 | `${pathSeparator}` | The character used to separate path components |
 | `${env:VARIABLE_NAME}` | The value of an environment variable |
+| `${secret:NAME}` | A secret from the OS keychain (`password` and `passphrase` only) |
 
 **Example with dynamic directory:**
 
@@ -94,6 +96,25 @@ PRO Deployer supports VS Code-like variables in configuration values. This is us
 
 This allows you to use the same configuration template across multiple workspaces, and the `dir` will automatically resolve to the workspace folder name (e.g., `/var/www/my-project`).
 
+### Secrets (keychain)
+
+Instead of a clear-text `password` or `passphrase`, store the value in the OS keychain and reference it by name:
+
+1. Run `PRO Deployer: Set Secret (keychain)` and enter a name (e.g. `my-sftp`) and the value.
+2. Reference it in the config:
+
+```js
+{
+    "password": "${secret:my-sftp}",
+    "passphrase": "${secret:my-key}"
+}
+```
+
+- `${secret:NAME}` is resolved only in the `password` and `passphrase` options.
+- Secrets are stored per machine and are not synced or written to the config file.
+- Run `PRO Deployer: Delete Secret (keychain)` to remove one. A missing secret resolves to an empty value and a warning is written to the output channel.
+- Clear-text passwords keep working. Passwords are never written to the output channel.
+
 ### Full Configuration Example
 
 ```js
@@ -103,6 +124,7 @@ This allows you to use the same configuration template across multiple workspace
     "uploadOnSave": true, //on file change will be uploaded to active targets
     "autoDelete": true, //on file delete will be deleted to active targets
     "checkGitignore": false, //skip files that are ignored in .gitignore
+    "respectIgnoreOnDownload": false, //skip ignored files/folders when downloading directories
     "activeTargets": [
         "My SFTP"
     ],
@@ -196,7 +218,10 @@ This extension contributes the following commands:
 - `pro-deployer.delete`: delete file or folder from active targets
 - `pro-deployer.delete-from`: delete file or folder from selected target
 - `pro-deployer.diff-with`: compare local file with remote file
+- `pro-deployer.browse-remote-dir`: browse the remote file system and save the selected directory as a target's `dir`
 - `pro-deployer.upload-all-open`: upload all open files
 - `pro-deployer.show-output-channel`: show output channel of PRO Deployer
+- `pro-deployer.set-secret`: store a password/passphrase in the OS keychain
+- `pro-deployer.delete-secret`: remove a stored secret
 - `pro-deployer.cancel-all-actions`: stop all actions (uploads, downloads, deletes) and remove all actions from queue
 - `pro-deployer.upload-all-uncommitted`: upload all uncommitted files

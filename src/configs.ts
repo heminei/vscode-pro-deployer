@@ -1,8 +1,10 @@
 import { TextEncoder } from "util";
 import * as vscode from "vscode";
+import * as jsonc from "jsonc-parser";
 import { Extension } from "./extension";
 import { ConfigsInterface, TargetOptionsInterface } from "./targets/Interfaces";
 import { VariableResolver } from "./VariableResolver";
+import { SecretManager } from "./SecretManager";
 
 export class Configs {
     public static readonly sampleConfig: ConfigsInterface = {
@@ -11,6 +13,7 @@ export class Configs {
         uploadOnSave: true,
         autoDelete: true,
         checkGitignore: false,
+        respectIgnoreOnDownload: false,
         activeTargets: ["My SFTP"],
         concurrency: 5,
         ignore: [".git/**/*", ".vscode/**/*"],
@@ -53,6 +56,7 @@ export class Configs {
         autoDelete: true,
         uploadOnSave: true,
         checkGitignore: false,
+        respectIgnoreOnDownload: false,
         concurrency: 5,
         ignore: [".git/**/*", ".vscode/**/*"],
         include: [],
@@ -61,6 +65,7 @@ export class Configs {
     };
     private static configs: ConfigsInterface = Configs.defaultConfigs;
     private static workspaceConfigs: { [index: string]: ConfigsInterface } = {};
+    private static onLoaded: Function | undefined;
 
     public static getConfigs() {
         return this.configs;
@@ -145,16 +150,77 @@ export class Configs {
             },
         );
     }
-    public static init(cb: Function) {
-        const promises = [] as Thenable<Uint8Array<ArrayBufferLike>>[];
-        this.getWorkspaceConfigFiles().forEach((file, index) => {
-            const promise = vscode.workspace.fs.readFile(file);
-            promises.push(promise);
-            promise.then((value) => {
-                let workspaceConfigs = Extension.extensionContext.workspaceState.get("configs");
-                if (!workspaceConfigs) {
-                    workspaceConfigs = {};
+    public static async setTargetDir(configFile: vscode.Uri, targetIndex: number, dir: string): Promise<void> {
+        const document = await vscode.workspace.openTextDocument(configFile);
+        const wasDirty = document.isDirty;
+
+        const edits = jsonc.modify(document.getText(), ["targets", targetIndex, "dir"], dir, {
+            formattingOptions: { insertSpaces: false },
+        });
+        const workspaceEdit = new vscode.WorkspaceEdit();
+        edits.forEach((edit) => {
+            workspaceEdit.replace(
+                configFile,
+                new vscode.Range(document.positionAt(edit.offset), document.positionAt(edit.offset + edit.length)),
+                edit.content,
+            );
+        });
+        if (!(await vscode.workspace.applyEdit(workspaceEdit))) {
+            throw new Error("Can't update the config file");
+        }
+        // Saving triggers the config reload; unsaved user changes are left untouched.
+        if (!wasDirty) {
+            await document.save();
+        }
+    }
+
+    // Never log secrets, whether typed in clear text or resolved from the keychain.
+    public static stringifyRedacted(configs: unknown): string {
+        return JSON.stringify(configs, (key, value) =>
+            (key === "password" || key === "passphrase") && value ? "***" : value,
+        );
+    }
+
+    public static async resolveSecrets(configs: ConfigsInterface): Promise<ConfigsInterface> {
+        if (!Array.isArray(configs.targets)) {
+            return configs;
+        }
+        const targets = await Promise.all(
+            configs.targets.map(async (target) => {
+                const resolved = { ...target };
+                for (const field of ["password", "passphrase"] as const) {
+                    const value = resolved[field];
+                    if (typeof value === "string") {
+                        resolved[field] = await SecretManager.resolveString(value);
+                    }
                 }
+                return resolved;
+            }),
+        );
+        return { ...configs, targets };
+    }
+
+    private static async buildConfigs(fileConfigs: ConfigsInterface, file: vscode.Uri): Promise<ConfigsInterface> {
+        const workspaceConfigs = Extension.extensionContext.workspaceState.get("configs") ?? {};
+
+        let configs = Object.assign({}, this.defaultConfigs, fileConfigs, workspaceConfigs);
+        if (fileConfigs.ignore) {
+            configs.ignore = fileConfigs.ignore;
+        }
+
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(file);
+        if (workspaceFolder) {
+            configs = VariableResolver.resolveObject(configs, workspaceFolder);
+        }
+        return this.resolveSecrets(configs);
+    }
+
+    private static async loadAll(): Promise<void> {
+        const loaded: { [index: string]: ConfigsInterface } = {};
+
+        await Promise.allSettled(
+            this.getWorkspaceConfigFiles().map(async (file, index) => {
+                const value = await vscode.workspace.fs.readFile(file);
 
                 let fileConfigs = {} as ConfigsInterface;
                 try {
@@ -164,111 +230,41 @@ export class Configs {
                     return;
                 }
 
-                let configs = Object.assign({}, this.defaultConfigs, fileConfigs, workspaceConfigs);
-                if (fileConfigs.ignore) {
-                    configs.ignore = fileConfigs.ignore;
-                }
-
-                // Resolve variables in target configurations
-                const workspaceFolder = vscode.workspace.getWorkspaceFolder(file);
-                if (workspaceFolder && configs) {
-                    configs = VariableResolver.resolveObject(configs, workspaceFolder);
-                }
-
+                const configs = await this.buildConfigs(fileConfigs, file);
                 if (index === 0) {
                     this.configs = configs;
                 }
-                this.workspaceConfigs[file.path] = configs;
-                Extension.appendLineToOutputChannel("[INFO] The config file is loaded: " + JSON.stringify(configs));
-            });
-        });
+                loaded[file.path] = configs;
+                Extension.appendLineToOutputChannel(
+                    "[INFO] The config file is loaded: " + this.stringifyRedacted(configs),
+                );
+            }),
+        );
 
-        Promise.allSettled(promises).finally(() => {
+        // Swap only when done so readers never see a half-loaded map.
+        this.workspaceConfigs = loaded;
+    }
+
+    public static async reload() {
+        await this.loadAll();
+        this.onLoaded?.();
+    }
+
+    public static init(cb: Function) {
+        this.onLoaded = cb;
+
+        this.loadAll().finally(() => {
             cb();
         });
 
         const disposables = vscode.workspace.onDidSaveTextDocument((e) => {
-            if (
-                vscode.workspace.asRelativePath(e.uri.path) ===
-                vscode.workspace.asRelativePath(Configs.getConfigFile().path)
-            ) {
-                let workspaceConfigs = Extension.extensionContext.workspaceState.get("configs");
-                if (!workspaceConfigs) {
-                    workspaceConfigs = {};
-                }
-
-                let fileConfigs = {} as ConfigsInterface;
-                try {
-                    fileConfigs = JSON.parse(e.getText());
-                } catch (error) {
-                    Extension.showErrorMessage("Can't parse config file. Check config syntax.");
-                    return;
-                }
-                this.configs = Object.assign({}, this.defaultConfigs, fileConfigs, workspaceConfigs);
-                if (fileConfigs.ignore) {
-                    this.configs.ignore = fileConfigs.ignore;
-                }
-
-                // Resolve variables in target configurations
-                const workspaceFolder = vscode.workspace.getWorkspaceFolder(e.uri);
-                if (workspaceFolder && this.configs) {
-                    this.configs = VariableResolver.resolveObject(this.configs, workspaceFolder);
-                    this.workspaceConfigs[workspaceFolder.uri.path + "/.vscode/pro-deployer.json"] = this.configs;
-                }
-
-                Extension.appendLineToOutputChannel(
-                    "[INFO] The config file is updated: " + JSON.stringify(this.configs),
-                );
-                cb();
-            }
-
-            if (
+            const isConfigFile =
                 this.getWorkspaceConfigFiles().findIndex(
                     (file) =>
                         vscode.workspace.asRelativePath(e.uri.path) === vscode.workspace.asRelativePath(file.path),
-                ) > -1
-            ) {
-                this.workspaceConfigs = {};
-                this.getWorkspaceConfigFiles().forEach((file, index) => {
-                    const promise = vscode.workspace.fs.readFile(file);
-                    promises.push(promise);
-                    promise.then((value) => {
-                        let workspaceConfigs = Extension.extensionContext.workspaceState.get("configs");
-                        if (!workspaceConfigs) {
-                            workspaceConfigs = {};
-                        }
-
-                        let fileConfigs = {} as ConfigsInterface;
-                        try {
-                            fileConfigs = JSON.parse(value.toString());
-                        } catch (error) {
-                            Extension.showErrorMessage("Can't parse config file. Check config syntax.");
-                            return;
-                        }
-
-                        let configs = Object.assign({}, this.defaultConfigs, fileConfigs, workspaceConfigs);
-                        if (fileConfigs.ignore) {
-                            configs.ignore = fileConfigs.ignore;
-                        }
-
-                        // Resolve variables in target configurations
-                        const workspaceFolder = vscode.workspace.getWorkspaceFolder(file);
-                        if (workspaceFolder && configs) {
-                            configs = VariableResolver.resolveObject(configs, workspaceFolder);
-                        }
-
-                        if (index === 0) {
-                            this.configs = configs;
-                        }
-                        this.workspaceConfigs[file.path] = configs;
-
-                        Extension.appendLineToOutputChannel(
-                            "[INFO] The config file is loaded: " + JSON.stringify(this.configs),
-                        );
-                    });
-                });
-
-                Promise.all(promises).then(() => {
+                ) > -1;
+            if (isConfigFile) {
+                this.loadAll().finally(() => {
                     cb();
                 });
             }

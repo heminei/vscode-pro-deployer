@@ -1,5 +1,5 @@
 import { Extension } from "../extension";
-import { QueueTask, TargetInterface, TargetOptionsInterface } from "./Interfaces";
+import { QueueTask, RemoteDirEntry, TargetInterface, TargetOptionsInterface } from "./Interfaces";
 import * as path from "path";
 import * as vscode from "vscode";
 import ssh2 = require("ssh2");
@@ -348,7 +348,7 @@ export class SFTP extends Target implements TargetInterface {
             this.queue.push(job);
         });
     }
-    download(uri: vscode.Uri, destination?: vscode.Uri): Promise<vscode.Uri> {
+    download(uri: vscode.Uri, destination?: vscode.Uri, checkIgnore: boolean = false): Promise<vscode.Uri> {
         const relativePath = Targets.getRelativePath(this.options, uri);
 
         if (destination === undefined) {
@@ -358,6 +358,11 @@ export class SFTP extends Target implements TargetInterface {
         return new Promise<vscode.Uri>((resolve, reject) => {
             if (!this.isConnected) {
                 reject("Not connected");
+                return;
+            }
+            if (checkIgnore && Extension.isUriIgnored(uri, false, true)) {
+                Extension.appendLineToOutputChannel("[INFO][SFTP] Skipped ignored file: '" + relativePath);
+                resolve(uri);
                 return;
             }
 
@@ -400,14 +405,49 @@ export class SFTP extends Target implements TargetInterface {
             job.uri = uri;
             job.isFile = true;
             job.action = "download";
+            job.cancel = () => reject("Canceled");
             this.queue.push(job);
         });
     }
-    downloadDir(uri: vscode.Uri): Promise<vscode.Uri> {
-        var relativePath = Targets.getRelativePath(this.options, uri);
-        if (relativePath === Extension.getActiveWorkspaceFolder()?.uri.path) {
-            relativePath = "";
-        }
+    listDir(remotePath: string): Promise<RemoteDirEntry[]> {
+        return new Promise<RemoteDirEntry[]>((resolve, reject) => {
+            const sftp = this.sftp;
+            if (!this.isConnected || !sftp) {
+                reject("Not connected");
+                return;
+            }
+            sftp.readdir(remotePath, (err, list) => {
+                if (err) {
+                    Extension.appendLineToOutputChannel(
+                        "[ERROR][SFTP] Can't list dir: '" + remotePath + "'. Error: " + err,
+                    );
+                    reject(err);
+                    return;
+                }
+                Promise.all(
+                    list.map(
+                        (item) =>
+                            new Promise<RemoteDirEntry>((statResolve) => {
+                                if (!item.attrs.isSymbolicLink()) {
+                                    statResolve({ name: item.filename, isDirectory: item.attrs.isDirectory() });
+                                    return;
+                                }
+                                // readdir reports the link itself, so follow it to see if it points to a directory
+                                sftp.stat(path.posix.join(remotePath, item.filename), (statErr, stats) => {
+                                    statResolve({
+                                        name: item.filename,
+                                        isDirectory: !statErr && stats.isDirectory(),
+                                    });
+                                });
+                            }),
+                    ),
+                ).then(resolve, reject);
+            });
+        });
+    }
+    downloadDir(uri: vscode.Uri, checkIgnore: boolean = false): Promise<vscode.Uri> {
+        const relativePath = Targets.getRelativePath(this.options, uri);
+        const workspaceUri = this.getWorkspaceFolder().uri;
 
         // Get baseDir for constructing local paths
         let baseDir = this.options.baseDir ?? "";
@@ -423,11 +463,16 @@ export class SFTP extends Target implements TargetInterface {
                 reject("Not connected");
                 return;
             }
+            const generation = this.queue.generation;
             const job = <QueueTask>((cb) => {
                 const readDir = (dir: string): Promise<any> => {
                     return new Promise<any>((readDirResolve, readDirReject) => {
+                        if (this.queue.generation !== generation) {
+                            readDirResolve([]);
+                            return;
+                        }
                         Extension.appendLineToOutputChannel("[INFO][SFTP] Start read dir: '" + dir);
-                        this.sftp?.readdir(this.options.dir + dir, (err, list) => {
+                        this.sftp?.readdir(path.posix.join(this.options.dir || "/", dir), (err, list) => {
                             if (err) {
                                 Extension.appendLineToOutputChannel(
                                     "[ERROR][SFTP] Can't read dir: '" + dir + "'. Error: " + err,
@@ -436,49 +481,54 @@ export class SFTP extends Target implements TargetInterface {
                                 readDirReject(err);
                                 return;
                             }
+                            if (this.queue.generation !== generation) {
+                                readDirResolve([]);
+                                return;
+                            }
                             Extension.appendLineToOutputChannel("[INFO][SFTP] Dir files: " + list.length);
                             let statPromises: Promise<vscode.Uri>[] = [];
 
                             list.forEach((item) => {
                                 statPromises.push(
                                     new Promise<vscode.Uri>((statResolve, statReject) => {
-                                        const file = vscode.Uri.file(
-                                            Extension.getActiveWorkspaceFolder()?.uri.path +
-                                                "/" +
-                                                baseDir +
-                                                dir +
-                                                "/" +
-                                                item.filename,
-                                        );
-                                        this.sftp?.stat(this.options.dir + dir + "/" + item.filename, (err, stats) => {
+                                        const file = vscode.Uri.joinPath(workspaceUri, baseDir, dir, item.filename);
+                                        const remoteFile = path.posix.join(this.options.dir || "/", dir, item.filename);
+                                        this.sftp?.stat(remoteFile, (err, stats) => {
                                             if (err) {
                                                 Extension.appendLineToOutputChannel(
-                                                    "[ERROR][SFTP] Can't get stat for: '" +
-                                                        this.options.dir +
-                                                        dir +
-                                                        "/" +
-                                                        item.filename +
-                                                        "'. Error: " +
-                                                        err,
+                                                    "[ERROR][SFTP] Can't get stat for: '" + remoteFile + "'. Error: " + err,
                                                 );
                                                 statReject(err);
+                                                return;
+                                            }
+                                            if (this.queue.generation !== generation) {
+                                                statResolve(file);
                                                 return;
                                             }
 
                                             let downloadOrReadPromise: Promise<any> | undefined = undefined;
 
                                             if (stats.isFile()) {
-                                                downloadOrReadPromise = this.download(file);
+                                                downloadOrReadPromise = this.download(file, undefined, checkIgnore);
                                             } else if (stats.isDirectory()) {
+                                                if (checkIgnore && Extension.isUriIgnored(file, true, true)) {
+                                                    Extension.appendLineToOutputChannel(
+                                                        "[INFO][SFTP] Skipped ignored dir: '" + remoteFile,
+                                                    );
+                                                    statResolve(file);
+                                                    return;
+                                                }
                                                 downloadOrReadPromise = readDir(dir + "/" + item.filename);
                                             }
                                             if (!downloadOrReadPromise) {
                                                 statReject("Unknown file type");
                                                 return;
                                             }
-                                            downloadOrReadPromise.finally(() => {
-                                                statResolve(file);
-                                            });
+                                            // download() rejects when canceled; that must not surface as unhandled
+                                            downloadOrReadPromise.then(
+                                                () => statResolve(file),
+                                                () => statResolve(file),
+                                            );
                                         });
                                     }),
                                 );
@@ -500,6 +550,7 @@ export class SFTP extends Target implements TargetInterface {
             job.uri = uri;
             job.isFile = true;
             job.action = "downloadDir";
+            job.cancel = () => resolve(uri);
             this.queue.push(job);
         });
     }

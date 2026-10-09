@@ -87,6 +87,10 @@ export class VariableResolver {
             { variable: "${userHome}", description: "The path of the user's home folder" },
             { variable: "${pathSeparator}", description: "The character used to separate path components" },
             { variable: "${env:VARIABLE_NAME}", description: "The value of an environment variable" },
+            {
+                variable: "${secret:NAME}",
+                description: "A secret from the OS keychain (password and passphrase only)",
+            },
         ];
     }
 }
