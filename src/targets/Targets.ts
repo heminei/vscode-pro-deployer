@@ -30,6 +30,19 @@ export class Targets {
         });
     }
 
+    public static getActiveForUri(uri: vscode.Uri) {
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+        if (!workspaceFolder) {
+            return [];
+        }
+        const activeTargets = Configs.getWorkspaceConfigs(uri).activeTargets ?? [];
+        return Targets.items.filter(
+            (target) =>
+                target.getWorkspaceFolder().uri.path === workspaceFolder.uri.path &&
+                activeTargets.indexOf(target.getName()) !== -1
+        );
+    }
+
     public static getItems() {
         return Targets.items;
     }
@@ -40,14 +53,8 @@ export class Targets {
     ): TargetInterface | null {
         switch (targetConfig.type) {
             case TargetTypes.ftp:
-                if (!targetConfig.port) {
-                    targetConfig.port = 21;
-                }
                 return new FTP(targetConfig, workspaceFolder);
             case TargetTypes.sftp:
-                if (!targetConfig.port) {
-                    targetConfig.port = 22;
-                }
                 return new SFTP(targetConfig, workspaceFolder);
             default:
                 Extension.showErrorMessage("[PRO Deployer] Target '" + targetConfig.name + "' have invalid type");

@@ -33,6 +33,9 @@ export interface TargetOptionsInterface {
     useAuthAgent?: boolean;
     authAgentPath?: string;
 
+    // SFTP host key fingerprint (OpenSSH "SHA256:..." or hex); the connection is refused on mismatch
+    hostFingerprint?: string;
+
     // Optional keepalive interval in milliseconds
     keepaliveIntervalMs?: number;
 
@@ -46,7 +49,7 @@ export interface TargetInterface {
     download(uri: vscode.Uri, destination?: vscode.Uri, checkIgnore?: boolean): Promise<vscode.Uri>;
     downloadDir(uri: vscode.Uri, checkIgnore?: boolean): Promise<vscode.Uri>;
     listDir(remotePath: string): Promise<RemoteDirEntry[]>;
-    delete(uri: vscode.Uri): Promise<vscode.Uri>;
+    delete(uri: vscode.Uri, options?: { quiet?: boolean }): Promise<vscode.Uri>;
     deleteDir(uri: vscode.Uri): Promise<vscode.Uri>;
     destroy(): void;
     getName(): string;
@@ -68,6 +71,8 @@ export interface QueueTask extends Queue.Task<vscode.Uri> {
     uri: vscode.Uri;
     isFile: boolean;
     action: string;
+    // A failure is only logged, no error popup (used for guesses that may legitimately fail)
+    quiet?: boolean;
 }
 
 // export interface ReadDirPath {

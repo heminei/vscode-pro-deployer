@@ -10,11 +10,11 @@ export class Queue<T extends Task<any>> extends EventEmitter {
     public concurrency: number = 0;
     public autostart: boolean = false;
     private running = false;
+    private filling = false;
     private _generation = 0;
 
     private pendingTasks: T[] = [];
     private executionTasks: T[] = [];
-    private executedTasks: T[] = [];
 
     constructor() {
         super();
@@ -55,24 +55,30 @@ export class Queue<T extends Task<any>> extends EventEmitter {
             this.emit("start");
         }
         this.running = true;
+        // A task finishing synchronously calls start() again; the loop below already picks up the next one
+        if (this.filling) {
+            return this;
+        }
 
-        if (this.executionTasks.length >= this.concurrency && this.concurrency !== 0) {
-            return this;
-        }
-        if (this.pendingTasks.length === 0 && this.executionTasks.length === 0) {
-            this.running = false;
-            this.emit("end");
-            this.executedTasks = [];
-            return this;
-        }
-        if (this.pendingTasks.length > 0) {
-            const next = this.next();
-            if (next) {
-                this.run(next);
+        this.filling = true;
+        try {
+            while (this.running) {
+                if (this.concurrency !== 0 && this.executionTasks.length >= this.concurrency) {
+                    break;
+                }
+                if (this.pendingTasks.length === 0) {
+                    if (this.executionTasks.length > 0) {
+                        break;
+                    }
+                    this.running = false;
+                    // An "end" listener may queue more work and restart the loop
+                    this.emit("end");
+                    continue;
+                }
+                this.run(this.pendingTasks[0]);
             }
-        }
-        if (this.running && this.pendingTasks.length > 0) {
-            this.start();
+        } finally {
+            this.filling = false;
         }
 
         return this;
@@ -90,7 +96,6 @@ export class Queue<T extends Task<any>> extends EventEmitter {
         this.running = false;
         this.pendingTasks = [];
         this.executionTasks = [];
-        this.executedTasks = [];
 
         this.emit("end");
         cancelled.forEach((task) => task.cancel?.());
@@ -109,7 +114,6 @@ export class Queue<T extends Task<any>> extends EventEmitter {
                 return;
             }
             this.executionTasks.splice(index, 1);
-            this.executedTasks.push(task);
             if (this.running) {
                 this.start();
             }
@@ -118,38 +122,26 @@ export class Queue<T extends Task<any>> extends EventEmitter {
         const cb = (error?: any) => {
             if (error) {
                 this.emit("task.error", task, error);
-                finish();
-                return this;
+            } else {
+                this.emit("task.success", task);
             }
-
-            this.emit("task.success", task);
             finish();
         };
 
         this.emit("task.start", task);
-        let promise = task(cb);
+        const promise = task(cb);
         if (promise) {
-            promise.then(
-                (value) => {
-                    this.emit("task.success", task, value);
-                },
-                (reason) => {
-                    this.emit("task.error", task, reason);
-                }
-            );
-            promise.finally(finish);
+            promise
+                .then(
+                    (value) => {
+                        this.emit("task.success", task, value);
+                    },
+                    (reason) => {
+                        this.emit("task.error", task, reason);
+                    }
+                )
+                .then(finish);
         }
         return this;
-    }
-
-    private next(): T | null {
-        if (this.pendingTasks.length === 0) {
-            return null;
-        }
-        const first = this.pendingTasks.find((e) => true);
-        if (first) {
-            return first;
-        }
-        return null;
     }
 }

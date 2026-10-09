@@ -6,53 +6,22 @@ import * as vscode from "vscode";
 import ssh2 = require("ssh2");
 import { Queue } from "../Queue";
 import { Configs } from "../configs";
-import EventEmitter = require("events");
-import { Targets } from "./Targets";
 import { Target } from "./Target";
-import * as process from "process";
+import { Targets } from "./Targets";
 
 export class SFTP extends Target implements TargetInterface {
     private client = new ssh2.Client();
     private sftp: ssh2.SFTPWrapper | null = null;
     private name: string;
+    private options: TargetOptionsInterface;
     private isConnected: boolean = false;
     private isConnecting: boolean = false;
     private queue: Queue<QueueTask> = new Queue<QueueTask>();
     private creatingDirectories: Map<string, Promise<string>> = new Map([]);
-    private keepaliveLogTimer: NodeJS.Timeout | null = null;
 
-    private startKeepaliveLogging(): void {
-        this.stopKeepaliveLogging();
-        if (!this.options.keepaliveIntervalMs) {
-            Extension.appendLineToOutputChannel(
-                "[INFO][SFTP] Keepalive logging is disabled (keepaliveIntervalMs is not set)",
-            );
-            return;
-        }
-        const intervalMs = this.options.keepaliveIntervalMs;
-        this.keepaliveLogTimer = setInterval(() => {
-            if (!this.isConnected) {
-                return;
-            }
-            Extension.appendLineToOutputChannel("[INFO][SFTP] Keepalive request (intervalMs: " + intervalMs + ")");
-        }, intervalMs);
-        // Avoid keeping the extension host alive just because of the timer
-        (this.keepaliveLogTimer as any).unref?.();
-    }
-
-    private stopKeepaliveLogging(): void {
-        if (this.keepaliveLogTimer) {
-            clearInterval(this.keepaliveLogTimer);
-            this.keepaliveLogTimer = null;
-        }
-    }
-
-    constructor(
-        private options: TargetOptionsInterface,
-        workspaceFolder: vscode.WorkspaceFolder,
-    ) {
+    constructor(options: TargetOptionsInterface, workspaceFolder: vscode.WorkspaceFolder) {
         super(workspaceFolder);
-        this.setMaxListeners(10000);
+        this.options = Target.normalizeOptions(options, 22);
 
         this.name = options.name;
 
@@ -60,71 +29,28 @@ export class SFTP extends Target implements TargetInterface {
         this.queue.autostart = true;
         this.queue.setMaxListeners(10000);
 
-        this.client.setMaxListeners(10000);
+        // Registered once here; connect() only starts the attempt
         this.client.on("error", (error: any) => {
             Extension.appendLineToOutputChannel("[ERROR][SFTP] " + error);
+            this.failConnect(error);
         });
-        this.client.on("close", () => {
-            this.isConnected = false;
-            this.isConnecting = false;
-            this.stopKeepaliveLogging();
-            Extension.appendLineToOutputChannel("[INFO][SFTP] The connection is closed");
-        });
-        this.client.on("end", () => {
-            this.isConnected = false;
-            this.isConnecting = false;
-            this.stopKeepaliveLogging();
-            Extension.appendLineToOutputChannel("[INFO][SFTP] The connection is ended");
-        });
-        Extension.appendLineToOutputChannel(
-            "[INFO][FTP] target is created. Workspace: " + this.getWorkspaceFolder().name + ". Name: " + this.name,
-        );
-    }
-
-    connect(cb: Function, errorCb: Function | undefined = undefined): void {
-        if (this.isConnected) {
-            cb();
-            return;
-        }
-
-        this.once("ready", () => {
-            cb();
-            Extension.appendLineToOutputChannel("[INFO][SFTP] Connected successfully to: " + this.options.host);
-        });
-        this.once("error", (error) => {
-            Extension.showErrorMessage("Can't connect to " + this.getName() + ": " + error);
-            if (errorCb) {
-                errorCb(error);
-            }
-        });
-
-        if (this.isConnecting === true) {
-            return;
-        }
-        this.isConnecting = true;
-
-        this.client.once("ready", () => {
+        this.client.on("close", () => this.onDisconnected("closed"));
+        this.client.on("end", () => this.onDisconnected("ended"));
+        this.client.on("ready", () => {
             this.client.sftp((err: any, sftpClient: ssh2.SFTPWrapper) => {
-                if (!err) {
-                    this.sftp = sftpClient;
-
-                    this.isConnected = true;
-                    this.isConnecting = false;
-                    this.startKeepaliveLogging();
-                    this.emit("ready", this);
-                } else {
+                if (err) {
                     Extension.appendLineToOutputChannel("[ERROR][SFTP] Can't convert ssh2 to sftp");
+                    this.failConnect(err);
+                    this.client.end();
+                    return;
                 }
+                this.sftp = sftpClient;
+                this.isConnected = true;
+                this.isConnecting = false;
+                Extension.appendLineToOutputChannel("[INFO][SFTP] Connected successfully to: " + this.options.host);
+                this.resolveConnectWaiters();
             });
         });
-        this.client.once("error", (error: any) => {
-            this.isConnected = false;
-            this.isConnecting = false;
-            this.stopKeepaliveLogging();
-            this.emit("error", error);
-        });
-
-        // Handle keyboard-interactive authentication
         this.client.on("keyboard-interactive", (name, instructions, instructionsLang, prompts, finish) => {
             Extension.appendLineToOutputChannel("[INFO][SFTP] Server requested keyboard-interactive authentication");
             if (name) {
@@ -133,21 +59,17 @@ export class SFTP extends Target implements TargetInterface {
             if (instructions) {
                 Extension.appendLineToOutputChannel("[INFO][SFTP] Keyboard-interactive instructions: " + instructions);
             }
-            Extension.appendLineToOutputChannel("[INFO][SFTP] Keyboard-interactive prompts count: " + prompts.length);
             prompts.forEach((prompt, index) => {
                 Extension.appendLineToOutputChannel(
                     "[INFO][SFTP] Prompt " + index + ": " + prompt.prompt + " (echo: " + prompt.echo + ")",
                 );
             });
 
-            // Respond to prompts - typically password prompts
             const responses: string[] = prompts.map((prompt) => {
-                // Check if this is a password prompt
                 if (prompt.prompt.toLowerCase().includes("password") && this.options.password) {
                     Extension.appendLineToOutputChannel("[INFO][SFTP] Responding to password prompt");
                     return this.options.password;
                 }
-                // For other prompts, return empty string
                 Extension.appendLineToOutputChannel(
                     "[WARN][SFTP] Unknown prompt, sending empty response: " + prompt.prompt,
                 );
@@ -156,20 +78,57 @@ export class SFTP extends Target implements TargetInterface {
 
             finish(responses);
         });
+        Extension.appendLineToOutputChannel(
+            "[INFO][SFTP] target is created. Workspace: " + this.getWorkspaceFolder().name + ". Name: " + this.name,
+        );
+    }
 
-        if (!this.options.port) {
-            this.options.port = 22;
+    // A failure is only surfaced while an attempt is in progress; later errors are just logged
+    private failConnect(error: any): void {
+        const wasConnecting = this.isConnecting;
+        this.isConnected = false;
+        this.isConnecting = false;
+        if (wasConnecting) {
+            Extension.showErrorMessage("Can't connect to " + this.getName() + ": " + error);
+            this.resolveConnectWaiters(error ?? "Unknown error");
         }
-        if (this.options.dir[this.options.dir.length - 1] !== "/") {
-            this.options.dir += "/";
+    }
+
+    private onDisconnected(what: string): void {
+        this.failConnect("The connection was " + what);
+        this.isConnected = false;
+        this.sftp = null;
+        Extension.appendLineToOutputChannel("[INFO][SFTP] The connection is " + what);
+    }
+
+    private verifyHostKey(hexHash: string, expected: string): boolean {
+        const base64 = Buffer.from(hexHash, "hex").toString("base64").replace(/=+$/, "");
+        const given = expected.trim().replace(/^SHA256:/i, "");
+        const matches =
+            given.replace(/:/g, "").toLowerCase() === hexHash.toLowerCase() || given.replace(/=+$/, "") === base64;
+        if (!matches) {
+            Extension.appendLineToOutputChannel(
+                "[ERROR][SFTP] Host key fingerprint mismatch. Expected: " + expected + ". Actual: SHA256:" + base64,
+            );
         }
-        if (!this.options.keepaliveIntervalMs) {
-            this.options.keepaliveIntervalMs = 10000;
+        return matches;
+    }
+
+    connect(cb: Function, errorCb: Function | undefined = undefined): void {
+        if (this.isConnected) {
+            cb();
+            return;
         }
 
-        let privateKey = undefined;
+        this.addConnectWaiter(cb, errorCb);
+
+        if (this.isConnecting === true) {
+            return;
+        }
+
+        let privateKey: Buffer | undefined = undefined;
         try {
-            privateKey = this.options.privateKey ? require("fs").readFileSync(this.options.privateKey) : undefined;
+            privateKey = this.options.privateKey ? fs.readFileSync(this.options.privateKey) : undefined;
             if (privateKey) {
                 Extension.appendLineToOutputChannel("[INFO][SFTP] Private key loaded from: " + this.options.privateKey);
                 Extension.appendLineToOutputChannel("[INFO][SFTP] Private key size: " + privateKey.length + " bytes");
@@ -197,8 +156,10 @@ export class SFTP extends Target implements TargetInterface {
                 "[ERROR][SFTP] Can't read private key file: " + this.options.privateKey + ". Error: " + err.message,
             );
             Extension.showErrorMessage("[SFTP] Can't read private key file: " + this.options.privateKey);
+            this.resolveConnectWaiters(err.message ?? "Can't read private key file");
             return;
         }
+        this.isConnecting = true;
 
         // Log authentication configuration
         Extension.appendLineToOutputChannel("[INFO][SFTP] === Authentication Configuration ===");
@@ -213,32 +174,45 @@ export class SFTP extends Target implements TargetInterface {
         Extension.appendLineToOutputChannel(
             "[INFO][SFTP] Connecting to: " + this.options.host + ":" + this.options.port,
         );
-        if (!this.options.authAgentPath) {
-            this.options.authAgentPath = process.env.SSH_AUTH_SOCK || undefined;
-        }
-        if (!this.options.useAuthAgent) {
-            this.options.useAuthAgent = false;
-        }
-        if (this.options.useAuthAgent && !this.options.authAgentPath) {
+        const authAgentPath = this.options.authAgentPath || process.env.SSH_AUTH_SOCK || undefined;
+        let useAuthAgent = this.options.useAuthAgent === true;
+        if (useAuthAgent && !authAgentPath) {
             Extension.appendLineToOutputChannel("[WARN][SFTP] Auth agent is enabled but no auth agent path is set.");
-            this.options.useAuthAgent = false;
+            useAuthAgent = false;
         }
         Extension.appendLineToOutputChannel(
-            "[INFO][SFTP] Auth agent: " +
-                (this.options.useAuthAgent ? "Enabled (" + this.options.authAgentPath + ")" : "Disabled"),
+            "[INFO][SFTP] Auth agent: " + (useAuthAgent ? "Enabled (" + authAgentPath + ")" : "Disabled"),
         );
-        this.client.connect({
-            host: this.options.host,
-            port: this.options.port,
-            username: this.options.user,
-            password: this.options.password,
-            privateKey: privateKey,
-            passphrase: this.options.passphrase,
-            tryKeyboard: true, // Enable keyboard-interactive fallback
-            agent: this.options.useAuthAgent ? this.options.authAgentPath : undefined,
-            keepaliveInterval: this.options.keepaliveIntervalMs,
-            keepaliveCountMax: this.options.keepaliveIntervalMs ? 3 : undefined,
-        });
+        const expectedFingerprint = this.options.hostFingerprint;
+        if (!expectedFingerprint) {
+            Extension.appendLineToOutputChannel(
+                "[WARN][SFTP] The host key is not verified. Set hostFingerprint to protect against MITM attacks.",
+            );
+        }
+        try {
+            this.client.connect({
+                host: this.options.host,
+                port: this.options.port,
+                username: this.options.user,
+                password: this.options.password,
+                privateKey: privateKey,
+                passphrase: this.options.passphrase,
+                tryKeyboard: true, // Enable keyboard-interactive fallback
+                agent: useAuthAgent ? authAgentPath : undefined,
+                keepaliveInterval: this.options.keepaliveIntervalMs,
+                keepaliveCountMax: 3,
+                ...(expectedFingerprint
+                    ? {
+                          hostHash: "sha256" as const,
+                          hostVerifier: (hash: string | Buffer) => this.verifyHostKey(String(hash), expectedFingerprint),
+                      }
+                    : {}),
+            });
+        } catch (error: any) {
+            // ssh2 throws synchronously for unparsable keys
+            Extension.appendLineToOutputChannel("[ERROR][SFTP] Can't start the connection: " + error?.message);
+            this.failConnect(error?.message ?? error);
+        }
     }
     private async setRemoteMtime(uri: vscode.Uri, remotePath: string): Promise<void> {
         if (!this.options.preserveMtime || !this.sftp) {
@@ -269,6 +243,7 @@ export class SFTP extends Target implements TargetInterface {
             const job = <QueueTask>((cb) => {
                 if (!this.sftp) {
                     Extension.appendLineToOutputChannel("[ERROR][SFTP] SFTP client missing");
+                    cb("SFTP client missing");
                     reject("SFTP client missing");
                     return;
                 }
@@ -277,7 +252,8 @@ export class SFTP extends Target implements TargetInterface {
                     if (err) {
                         if (err.code === 2) {
                             // No such file or directory
-                            const dir = this.options.dir + path.dirname(relativePath);
+                            const dirName = path.posix.dirname(relativePath);
+                            const dir = (this.options.dir + (dirName === "." ? "" : dirName)).replace(/\/+$/, "") || "/";
 
                             Extension.appendLineToOutputChannel("[INFO][SFTP] Missing directory: " + dir);
                             this.mkdir(dir).then(
@@ -332,7 +308,7 @@ export class SFTP extends Target implements TargetInterface {
             this.queue.push(job);
         });
     }
-    delete(uri: vscode.Uri): Promise<vscode.Uri> {
+    delete(uri: vscode.Uri, options?: { quiet?: boolean }): Promise<vscode.Uri> {
         const relativePath = Targets.getRelativePath(this.options, uri);
 
         return new Promise<vscode.Uri>((resolve, reject) => {
@@ -344,6 +320,8 @@ export class SFTP extends Target implements TargetInterface {
             const job = <QueueTask>((cb) => {
                 if (!this.sftp) {
                     Extension.appendLineToOutputChannel("[ERROR][SFTP] SFTP client missing");
+                    cb("SFTP client missing");
+                    reject("SFTP client missing");
                     return;
                 }
                 this.sftp.unlink(this.options.dir + relativePath, (err: any) => {
@@ -368,6 +346,7 @@ export class SFTP extends Target implements TargetInterface {
             job.uri = uri;
             job.isFile = true;
             job.action = "delete";
+            job.quiet = options?.quiet;
             this.queue.push(job);
         });
     }
@@ -392,28 +371,19 @@ export class SFTP extends Target implements TargetInterface {
             const job = <QueueTask>((cb) => {
                 if (!this.sftp) {
                     Extension.appendLineToOutputChannel("[ERROR][SFTP] SFTP client missing");
+                    cb("SFTP client missing");
+                    reject("SFTP client missing");
                     return;
                 }
                 Extension.appendLineToOutputChannel("[INFO][SFTP] Read file: '" + relativePath);
-                this.sftp.readFile(this.options.dir + relativePath, {}, (err, handle) => {
+                this.sftp.readFile(this.options.dir + relativePath, {}, (err, data) => {
                     if (err) {
                         cb(err);
                         reject(err);
                         return;
                     }
-                    vscode.workspace.fs.writeFile(destination!, handle).then(
+                    this.saveDownloaded(destination!, data).then(
                         () => {
-                            // Check if the file is unsaved in the editor
-                            const unsaveFile = vscode.workspace.textDocuments.find(
-                                (doc) => doc.uri.fsPath === destination?.fsPath,
-                            );
-                            if (unsaveFile && unsaveFile.isDirty) {
-                                const edit = new vscode.WorkspaceEdit();
-                                const fullRange = new vscode.Range(0, 0, unsaveFile.lineCount, 0); // Range covering the entire document
-                                edit.replace(uri, fullRange, handle.toString());
-                                vscode.workspace.applyEdit(edit);
-                                unsaveFile.save();
-                            }
                             Extension.appendLineToOutputChannel("[INFO][SFTP] File downloaded: '" + relativePath);
                             cb();
                             resolve(uri);
@@ -487,88 +457,116 @@ export class SFTP extends Target implements TargetInterface {
                 return;
             }
             const generation = this.queue.generation;
+            const downloads: Promise<unknown>[] = [];
             const job = <QueueTask>((cb) => {
-                const readDir = (dir: string): Promise<any> => {
-                    return new Promise<any>((readDirResolve, readDirReject) => {
+                const readDir = (dir: string): Promise<void> => {
+                    return new Promise<void>((readDirResolve, readDirReject) => {
+                        const sftp = this.sftp;
                         if (this.queue.generation !== generation) {
-                            readDirResolve([]);
+                            readDirResolve();
                             return;
                         }
+                        if (!sftp) {
+                            readDirReject("SFTP client missing");
+                            return;
+                        }
+                        const remoteDir = path.posix.join(this.options.dir || "/", dir);
                         Extension.appendLineToOutputChannel("[INFO][SFTP] Start read dir: '" + dir);
-                        this.sftp?.readdir(path.posix.join(this.options.dir || "/", dir), (err, list) => {
+                        sftp.readdir(remoteDir, (err, list) => {
                             if (err) {
                                 Extension.appendLineToOutputChannel(
                                     "[ERROR][SFTP] Can't read dir: '" + dir + "'. Error: " + err,
                                 );
-                                cb(err);
                                 readDirReject(err);
                                 return;
                             }
                             if (this.queue.generation !== generation) {
-                                readDirResolve([]);
+                                readDirResolve();
                                 return;
                             }
                             Extension.appendLineToOutputChannel("[INFO][SFTP] Dir files: " + list.length);
-                            let statPromises: Promise<vscode.Uri>[] = [];
 
-                            list.forEach((item) => {
-                                statPromises.push(
-                                    new Promise<vscode.Uri>((statResolve, statReject) => {
-                                        const file = vscode.Uri.joinPath(workspaceUri, baseDir, dir, item.filename);
-                                        const remoteFile = path.posix.join(this.options.dir || "/", dir, item.filename);
-                                        this.sftp?.stat(remoteFile, (err, stats) => {
-                                            if (err) {
-                                                Extension.appendLineToOutputChannel(
-                                                    "[ERROR][SFTP] Can't get stat for: '" + remoteFile + "'. Error: " + err,
+                            Promise.all(
+                                list
+                                    .filter((item) => Target.isSafeRemoteName(item.filename))
+                                    .map(
+                                        (item) =>
+                                            new Promise<void>((entryResolve) => {
+                                                const file = vscode.Uri.joinPath(
+                                                    workspaceUri,
+                                                    baseDir,
+                                                    dir,
+                                                    item.filename,
                                                 );
-                                                statReject(err);
-                                                return;
-                                            }
-                                            if (this.queue.generation !== generation) {
-                                                statResolve(file);
-                                                return;
-                                            }
-
-                                            let downloadOrReadPromise: Promise<any> | undefined = undefined;
-
-                                            if (stats.isFile()) {
-                                                downloadOrReadPromise = this.download(file, undefined, checkIgnore);
-                                            } else if (stats.isDirectory()) {
-                                                if (checkIgnore && Extension.isUriIgnored(file, true, true)) {
-                                                    Extension.appendLineToOutputChannel(
-                                                        "[INFO][SFTP] Skipped ignored dir: '" + remoteFile,
-                                                    );
-                                                    statResolve(file);
-                                                    return;
-                                                }
-                                                downloadOrReadPromise = readDir(dir + "/" + item.filename);
-                                            }
-                                            if (!downloadOrReadPromise) {
-                                                statReject("Unknown file type");
-                                                return;
-                                            }
-                                            // download() rejects when canceled; that must not surface as unhandled
-                                            downloadOrReadPromise.then(
-                                                () => statResolve(file),
-                                                () => statResolve(file),
-                                            );
-                                        });
-                                    }),
-                                );
-                            });
-
-                            Promise.all(statPromises).finally(() => {
-                                cb();
-                                readDirResolve(list);
-                            });
+                                                const remoteFile = path.posix.join(remoteDir, item.filename);
+                                                const isLink = item.attrs.isSymbolicLink();
+                                                sftp.stat(remoteFile, (statErr, stats) => {
+                                                    if (statErr) {
+                                                        Extension.appendLineToOutputChannel(
+                                                            "[ERROR][SFTP] Can't get stat for: '" +
+                                                                remoteFile +
+                                                                "'. Error: " +
+                                                                statErr,
+                                                        );
+                                                        entryResolve();
+                                                        return;
+                                                    }
+                                                    if (this.queue.generation !== generation) {
+                                                        entryResolve();
+                                                        return;
+                                                    }
+                                                    if (stats.isFile()) {
+                                                        // Downloads are separate queue tasks, so this job never waits on its own queue
+                                                        downloads.push(
+                                                            this.download(file, undefined, checkIgnore).catch(
+                                                                () => undefined,
+                                                            ),
+                                                        );
+                                                        entryResolve();
+                                                    } else if (stats.isDirectory()) {
+                                                        if (isLink) {
+                                                            // Following directory links could loop forever
+                                                            Extension.appendLineToOutputChannel(
+                                                                "[INFO][SFTP] Skipped symlinked dir: '" + remoteFile,
+                                                            );
+                                                            entryResolve();
+                                                            return;
+                                                        }
+                                                        if (checkIgnore && Extension.isUriIgnored(file, true, true)) {
+                                                            Extension.appendLineToOutputChannel(
+                                                                "[INFO][SFTP] Skipped ignored dir: '" + remoteFile,
+                                                            );
+                                                            entryResolve();
+                                                            return;
+                                                        }
+                                                        readDir(dir + "/" + item.filename).then(
+                                                            () => entryResolve(),
+                                                            () => entryResolve(),
+                                                        );
+                                                    } else {
+                                                        entryResolve();
+                                                    }
+                                                });
+                                            }),
+                                    ),
+                            ).then(() => readDirResolve());
                         });
                     });
                 };
 
-                readDir(relativePath).finally(() => {
-                    resolve(uri);
-                    Extension.appendLineToOutputChannel("[INFO][SFTP] Dir downloaded: '" + relativePath);
-                });
+                readDir(relativePath).then(
+                    () => {
+                        cb();
+                        Promise.all(downloads).then(() => {
+                            resolve(uri);
+                            Extension.appendLineToOutputChannel("[INFO][SFTP] Dir downloaded: '" + relativePath);
+                        });
+                    },
+                    (error) => {
+                        cb(error);
+                        reject(error);
+                    },
+                );
             });
             job.uri = uri;
             job.isFile = true;
@@ -587,27 +585,63 @@ export class SFTP extends Target implements TargetInterface {
             }
 
             const job = <QueueTask>((cb) => {
-                const dir = this.options.dir + relativePath;
-                if (dir === "/") {
+                const sftp = this.sftp;
+                const remoteDir = this.options.dir + relativePath;
+                if (Target.isRemoteRoot(remoteDir)) {
                     cb("Can't delete '/' (root dir)");
                     reject("Can't delete '/' (root dir)");
                     return;
                 }
+                if (!sftp) {
+                    cb("SFTP client missing");
+                    reject("SFTP client missing");
+                    return;
+                }
+                const dir = remoteDir.replace(/\/+$/, "");
                 Extension.appendLineToOutputChannel("[INFO][SFTP] Start deleting dir: " + dir);
-                this.client.exec("rm -rf " + dir, (err, channel) => {
-                    if (err) {
-                        cb(err.message);
-                        reject(err.message);
-                        return;
-                    }
-                    cb();
-                    resolve(uri);
-                });
+                // Done over SFTP instead of `rm -rf`: no shell is involved, so odd file names can't inject commands
+                this.removeDir(sftp, dir).then(
+                    () => {
+                        cb();
+                        resolve(uri);
+                    },
+                    (error: any) => {
+                        const message = error?.message ?? String(error);
+                        cb(message);
+                        reject(message);
+                    },
+                );
             });
             job.uri = uri;
             job.action = "delete";
             job.isFile = false;
             this.queue.push(job);
+        });
+    }
+    private removeDir(sftp: ssh2.SFTPWrapper, dir: string): Promise<void> {
+        return new Promise<void>((resolve, reject) => {
+            sftp.readdir(dir, (err, list) => {
+                if (err) {
+                    reject(err);
+                    return;
+                }
+                Promise.all(
+                    list
+                        .filter((item) => Target.isSafeRemoteName(item.filename))
+                        .map((item) => {
+                            const remote = path.posix.join(dir, item.filename);
+                            // readdir attrs describe the link itself, so a symlinked dir is unlinked, never followed
+                            if (item.attrs.isDirectory()) {
+                                return this.removeDir(sftp, remote);
+                            }
+                            return new Promise<void>((unlinkResolve, unlinkReject) => {
+                                sftp.unlink(remote, (unlinkErr) => (unlinkErr ? unlinkReject(unlinkErr) : unlinkResolve()));
+                            });
+                        }),
+                ).then(() => {
+                    sftp.rmdir(dir, (rmdirErr) => (rmdirErr ? reject(rmdirErr) : resolve()));
+                }, reject);
+            });
         });
     }
     mkdir(dir: string): Promise<string> {
@@ -632,7 +666,7 @@ export class SFTP extends Target implements TargetInterface {
                 if (err) {
                     if (err.code === 2) {
                         // No such file or directory
-                        this.mkdir(path.dirname(dir)).then(
+                        this.mkdir(path.posix.dirname(dir)).then(
                             () => {
                                 this.sftp?.mkdir(dir, (err: any) => {
                                     if (err) {
@@ -672,9 +706,10 @@ export class SFTP extends Target implements TargetInterface {
                 resolve("");
             });
         });
-        promise.finally(() => {
+        const cleanup = () => {
             this.creatingDirectories.delete(dir);
-        });
+        };
+        promise.then(cleanup, cleanup);
         this.creatingDirectories.set(dir, promise);
 
         return promise;
@@ -689,11 +724,14 @@ export class SFTP extends Target implements TargetInterface {
     }
 
     destroy() {
-        if (this.isConnected) {
-            this.stopKeepaliveLogging();
-            this.client.end();
-            this.queue.end();
-            Extension.appendLineToOutputChannel("[INFO][SFTP] The connection is destroyed");
+        // Drop the attempt first so the close event doesn't report a failed connect
+        const wasConnecting = this.isConnecting;
+        this.isConnecting = false;
+        if (wasConnecting) {
+            this.resolveConnectWaiters("The target was destroyed");
         }
+        this.client.end();
+        this.queue.end();
+        Extension.appendLineToOutputChannel("[INFO][SFTP] The connection is destroyed");
     }
 }

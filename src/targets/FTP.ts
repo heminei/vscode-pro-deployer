@@ -5,7 +5,6 @@ import * as path from "path";
 import * as fs from "fs";
 import * as vscode from "vscode";
 import { Queue } from "../Queue";
-import EventEmitter = require("events");
 import { Configs } from "../configs";
 import { Targets } from "./Targets";
 import { Target } from "./Target";
@@ -13,41 +12,17 @@ import { Target } from "./Target";
 export class FTP extends Target implements TargetInterface {
     private client = new Client();
     private name: string;
+    private options: TargetOptionsInterface;
     private isConnected: boolean = false;
     private isConnecting: boolean = false;
     private queue: Queue<QueueTask> = new Queue<QueueTask>();
     private creatingDirectories: Map<string, Promise<string>> = new Map([]);
-    private keepaliveLogTimer: NodeJS.Timeout | null = null;
     private mfmtUnsupported: boolean = false;
 
-    private startKeepaliveLogging(): void {
-        this.stopKeepaliveLogging();
-        if (!this.options.keepaliveIntervalMs) {
-            return;
-        }
-        const intervalMs = this.options.keepaliveIntervalMs;
-        this.keepaliveLogTimer = setInterval(() => {
-            if (!this.isConnected) {
-                return;
-            }
-            Extension.appendLineToOutputChannel(
-                "[INFO][FTP] Keepalive request (intervalMs: " + intervalMs + ")"
-            );
-        }, intervalMs);
-        // Avoid keeping the extension host alive just because of the timer
-        (this.keepaliveLogTimer as any).unref?.();
-    }
-
-    private stopKeepaliveLogging(): void {
-        if (this.keepaliveLogTimer) {
-            clearInterval(this.keepaliveLogTimer);
-            this.keepaliveLogTimer = null;
-        }
-    }
-
-    constructor(private options: TargetOptionsInterface, workspaceFolder: vscode.WorkspaceFolder) {
+    constructor(options: TargetOptionsInterface, workspaceFolder: vscode.WorkspaceFolder) {
         super(workspaceFolder);
-        this.setMaxListeners(10000);
+        this.options = Target.normalizeOptions(options, 21);
+        this.options.transferDataType = this.options.transferDataType || "binary";
 
         this.name = options.name;
 
@@ -55,29 +30,59 @@ export class FTP extends Target implements TargetInterface {
         this.queue.autostart = true;
         this.queue.setMaxListeners(10000);
 
-        this.client.setMaxListeners(10000);
+        // Registered once here; connect() only starts the attempt
         this.client.on("greeting", (msg) => {
             Extension.appendLineToOutputChannel("[INFO][FTP] Greeting: " + msg);
         });
         this.client.on("error", (error) => {
+            if (this.isConnecting) {
+                this.failConnect(error);
+                return;
+            }
             Extension.showErrorMessage("[ERROR][FTP] " + error);
         });
-        this.client.on("close", () => {
-            this.isConnected = false;
+        this.client.on("close", () => this.onDisconnected("closed"));
+        this.client.on("end", () => this.onDisconnected("ended"));
+        this.client.on("ready", () => {
+            this.isConnected = true;
             this.isConnecting = false;
-            this.stopKeepaliveLogging();
-            Extension.appendLineToOutputChannel("[INFO][FTP] The connection is closed");
-        });
-        this.client.on("end", () => {
-            this.isConnected = false;
-            this.isConnecting = false;
-            this.stopKeepaliveLogging();
-            Extension.appendLineToOutputChannel("[INFO][FTP] The connection is ended");
+            this.mfmtUnsupported = false;
+            if (this.options.transferDataType !== "ascii") {
+                Extension.appendLineToOutputChannel("[INFO][FTP] Connected successfully to: " + this.options.host);
+                this.resolveConnectWaiters();
+                return;
+            }
+            this.client.ascii((err) => {
+                if (err) {
+                    this.resolveConnectWaiters(err);
+                    return;
+                }
+                Extension.appendLineToOutputChannel("[INFO][FTP] Connected successfully to: " + this.options.host);
+                Extension.appendLineToOutputChannel("[INFO][FTP] Set transfer data type to: ascii");
+                this.resolveConnectWaiters();
+            });
         });
 
         Extension.appendLineToOutputChannel(
             "[INFO][FTP] target is created. Workspace: " + this.getWorkspaceFolder().name + ". Name: " + this.name
         );
+    }
+
+    // A failure is only surfaced while an attempt is in progress
+    private failConnect(error: any): void {
+        const wasConnecting = this.isConnecting;
+        this.isConnected = false;
+        this.isConnecting = false;
+        if (wasConnecting) {
+            Extension.showErrorMessage("[FTP] Can't connect to " + this.getName() + ": " + error);
+            this.resolveConnectWaiters(error ?? "Unknown error");
+        }
+    }
+
+    private onDisconnected(what: string): void {
+        this.failConnect("The connection was " + what);
+        this.isConnected = false;
+        Extension.appendLineToOutputChannel("[INFO][FTP] The connection is " + what);
     }
 
     connect(cb: Function, errorCb: Function | undefined = undefined): void {
@@ -86,61 +91,13 @@ export class FTP extends Target implements TargetInterface {
             return;
         }
 
-        this.once("ready", () => {
-            if (this.options.transferDataType === "ascii") {
-                this.client.ascii((err) => {
-                    if (err) {
-                        if (errorCb) {
-                            errorCb(err);
-                        }
-                        return;
-                    }
-                    cb();
-                    Extension.appendLineToOutputChannel("[INFO][FTP] Connected successfully to: " + this.options.host);
-                    Extension.appendLineToOutputChannel("[INFO][FTP] Set transfer data type to: ascii");
-                });
-            } else {
-                cb();
-                Extension.appendLineToOutputChannel("[INFO][FTP] Connected successfully to: " + this.options.host);
-            }
-        });
-        this.once("error", (error) => {
-            if (errorCb) {
-                errorCb(error);
-            }
-        });
+        this.addConnectWaiter(cb, errorCb);
 
         if (this.isConnecting === true) {
             return;
         }
         this.isConnecting = true;
 
-        this.client.once("ready", () => {
-            this.isConnected = true;
-            this.isConnecting = false;
-            this.mfmtUnsupported = false;
-            this.startKeepaliveLogging();
-            this.emit("ready", this);
-        });
-        this.client.once("error", (error: any) => {
-            this.isConnected = false;
-            this.isConnecting = false;
-            this.stopKeepaliveLogging();
-            this.emit("error", error);
-        });
-
-        if (!this.options.port) {
-            this.options.port = 21;
-        }
-        if (this.options.dir[this.options.dir.length - 1] !== "/") {
-            this.options.dir += "/";
-        }
-        if (!this.options.keepaliveIntervalMs) {
-            this.options.keepaliveIntervalMs = 10000;
-        }
-        if (!this.options.transferDataType) {
-            this.options.transferDataType = "binary";
-        }
         Extension.appendLineToOutputChannel(
             "[INFO][FTP] Connecting to: " + this.options.host + ":" + this.options.port
         );
@@ -150,20 +107,28 @@ export class FTP extends Target implements TargetInterface {
                     (this.options.secure === "implicit" ? "implicit" : "explicit")
             );
         }
-        this.client.connect({
-            host: this.options.host,
-            port: this.options.port,
-            user: this.options.user,
-            password: this.options.password,
-            secure: this.options.secure,
-            keepalive: this.options.keepaliveIntervalMs,
-            // debug: (message) => {
-            //     console.log("debug", message);
-            // },
-            secureOptions: {
-                rejectUnauthorized: this.options.secureOptions?.rejectUnauthorized ?? false,
-            },
-        });
+        const rejectUnauthorized = this.options.secureOptions?.rejectUnauthorized ?? true;
+        if (this.options.secure && !rejectUnauthorized) {
+            Extension.appendLineToOutputChannel(
+                "[WARN][FTP] Certificate validation is disabled (secureOptions.rejectUnauthorized is false)"
+            );
+        }
+        try {
+            this.client.connect({
+                host: this.options.host,
+                port: this.options.port,
+                user: this.options.user,
+                password: this.options.password,
+                secure: this.options.secure,
+                keepalive: this.options.keepaliveIntervalMs,
+                secureOptions: {
+                    rejectUnauthorized,
+                },
+            });
+        } catch (error: any) {
+            Extension.appendLineToOutputChannel("[ERROR][FTP] Can't start the connection: " + error?.message);
+            this.failConnect(error?.message ?? error);
+        }
     }
     private async setRemoteMtime(uri: vscode.Uri, remotePath: string): Promise<void> {
         if (!this.options.preserveMtime || this.mfmtUnsupported) {
@@ -196,7 +161,7 @@ export class FTP extends Target implements TargetInterface {
             );
         }
     }
-    upload(uri: vscode.Uri, attempts = 1): Promise<vscode.Uri> {
+    upload(uri: vscode.Uri): Promise<vscode.Uri> {
         const relativePath = Targets.getRelativePath(this.options, uri);
 
         return new Promise<vscode.Uri>((resolve, reject) => {
@@ -209,15 +174,20 @@ export class FTP extends Target implements TargetInterface {
                 Extension.appendLineToOutputChannel("[INFO][FTP] Start uploading file: " + relativePath);
                 this.client.put(uri.fsPath, this.options.dir + relativePath, (err) => {
                     if (err) {
-                        // if (
-                        //     err.message.indexOf("No such file") !== -1 ||
-                        //     err.message.indexOf("Couldn't open the file or directory") !== -1
-                        // ) {
+                        // Only a missing parent directory is worth a retry; 450/550/553 are the "file unavailable" replies
+                        if (![450, 550, 553].includes((err as any).code)) {
+                            Extension.appendLineToOutputChannel(
+                                "[ERROR][FTP] Can't upload file: " + uri.path + ". Error: " + err.message
+                            );
+                            cb(err);
+                            reject(err);
+                            return;
+                        }
                         Extension.appendLineToOutputChannel(
-                            "[ERROR][FTP] Can't upload file: " + uri.path + ". Error: " + err.message
+                            "[INFO][FTP] Upload failed (" + err.message + "), trying to create the directory: " + uri.path
                         );
 
-                        const dirName = path.dirname(relativePath);
+                        const dirName = path.posix.dirname(relativePath);
                         const dir = this.options.dir + (dirName === "." ? "" : dirName);
                         this.mkdir(dir).then(
                             () => {
@@ -269,7 +239,7 @@ export class FTP extends Target implements TargetInterface {
             this.queue.push(job);
         });
     }
-    delete(uri: vscode.Uri): Promise<vscode.Uri> {
+    delete(uri: vscode.Uri, options?: { quiet?: boolean }): Promise<vscode.Uri> {
         const relativePath = Targets.getRelativePath(this.options, uri);
 
         return new Promise<vscode.Uri>((resolve, reject) => {
@@ -293,6 +263,7 @@ export class FTP extends Target implements TargetInterface {
             job.uri = uri;
             job.isFile = true;
             job.action = "delete";
+            job.quiet = options?.quiet;
             this.queue.push(job);
         });
     }
@@ -315,10 +286,6 @@ export class FTP extends Target implements TargetInterface {
             }
 
             const job = <QueueTask>((cb) => {
-                if (!this.client) {
-                    Extension.appendLineToOutputChannel("[ERROR][FTP] FTP client missing");
-                    return;
-                }
                 Extension.appendLineToOutputChannel("[INFO][FTP] Read file: '" + relativePath);
                 this.client.get(this.options.dir + relativePath, (err, stream) => {
                     if (err) {
@@ -329,19 +296,8 @@ export class FTP extends Target implements TargetInterface {
 
                     this.stream2buffer(stream).then(
                         (buffer) => {
-                            vscode.workspace.fs.writeFile(destination!, buffer).then(
+                            this.saveDownloaded(destination!, buffer).then(
                                 () => {
-                                    // Check if the file is unsaved in the editor
-                                    const unsaveFile = vscode.workspace.textDocuments.find(
-                                        (doc) => doc.uri.fsPath === destination?.fsPath
-                                    );
-                                    if (unsaveFile && unsaveFile.isDirty) {
-                                        const edit = new vscode.WorkspaceEdit();
-                                        const fullRange = new vscode.Range(0, 0, unsaveFile.lineCount, 0); // Range covering the entire document
-                                        edit.replace(uri, fullRange, buffer.toString());
-                                        vscode.workspace.applyEdit(edit);
-                                        unsaveFile.save();
-                                    }
                                     Extension.appendLineToOutputChannel(
                                         "[INFO][FTP] File downloaded: '" + relativePath
                                     );
@@ -424,31 +380,34 @@ export class FTP extends Target implements TargetInterface {
                 return;
             }
             const generation = this.queue.generation;
+            const downloads: Promise<unknown>[] = [];
             const job = <QueueTask>((cb) => {
-                const readDir = (dir: string): Promise<any> => {
-                    return new Promise<any>((readDirResolve, readDirReject) => {
+                const readDir = (dir: string): Promise<void> => {
+                    return new Promise<void>((readDirResolve, readDirReject) => {
                         if (this.queue.generation !== generation) {
-                            readDirResolve([]);
+                            readDirResolve();
                             return;
                         }
                         Extension.appendLineToOutputChannel("[INFO][FTP] Start read dir: '" + dir);
-                        this.client?.list(path.posix.join(this.options.dir || "/", dir), (err, list) => {
+                        this.client.list(path.posix.join(this.options.dir || "/", dir), (err, list) => {
                             if (err) {
                                 Extension.appendLineToOutputChannel(
                                     "[ERROR][FTP] Can't read dir: '" + dir + "'. Error: " + err
                                 );
-                                cb(err);
                                 readDirReject(err);
                                 return;
                             }
                             if (this.queue.generation !== generation) {
-                                readDirResolve([]);
+                                readDirResolve();
                                 return;
                             }
                             Extension.appendLineToOutputChannel("[INFO][FTP] Dir files: " + list.length);
-                            let downloadOrReadPromises: Promise<vscode.Uri>[] = [];
+                            const subDirs: Promise<void>[] = [];
 
                             list.forEach((item) => {
+                                if (!Target.isSafeRemoteName(item.name)) {
+                                    return;
+                                }
                                 const file = vscode.Uri.joinPath(workspaceUri, baseDir, dir, item.name);
                                 const isDirectory = item.type === "d";
 
@@ -460,26 +419,31 @@ export class FTP extends Target implements TargetInterface {
                                 }
 
                                 if (item.type === "-") {
-                                    downloadOrReadPromises.push(this.download(file));
-                                } else if (item.type === "d") {
-                                    downloadOrReadPromises.push(readDir(dir + "/" + item.name));
+                                    // Downloads are separate queue tasks, so this job never waits on its own queue
+                                    downloads.push(this.download(file).catch(() => undefined));
+                                } else if (isDirectory) {
+                                    subDirs.push(readDir(dir + "/" + item.name).catch(() => undefined));
                                 }
                             });
 
-                            // download() rejects when canceled; that must not surface as unhandled
-                            Promise.all(downloadOrReadPromises).then(
-                                () => readDirResolve(list),
-                                () => readDirResolve(list)
-                            );
+                            Promise.all(subDirs).then(() => readDirResolve());
                         });
                     });
                 };
 
-                readDir(relativePath).finally(() => {
-                    cb();
-                    resolve(uri);
-                    Extension.appendLineToOutputChannel("[INFO][FTP] Dir downloaded: '" + relativePath);
-                });
+                readDir(relativePath).then(
+                    () => {
+                        cb();
+                        Promise.all(downloads).then(() => {
+                            resolve(uri);
+                            Extension.appendLineToOutputChannel("[INFO][FTP] Dir downloaded: '" + relativePath);
+                        });
+                    },
+                    (error) => {
+                        cb(error);
+                        reject(error);
+                    }
+                );
             });
             job.uri = uri;
             job.isFile = true;
@@ -498,7 +462,13 @@ export class FTP extends Target implements TargetInterface {
             }
 
             const job = <QueueTask>((cb) => {
-                this.client.rmdir(this.options.dir + relativePath, true, (err) => {
+                const remoteDir = this.options.dir + relativePath;
+                if (Target.isRemoteRoot(remoteDir)) {
+                    cb("Can't delete '/' (root dir)");
+                    reject("Can't delete '/' (root dir)");
+                    return;
+                }
+                this.client.rmdir(remoteDir, true, (err) => {
                     if (err) {
                         cb(err.message);
                         reject(err.message);
@@ -538,9 +508,10 @@ export class FTP extends Target implements TargetInterface {
 
         this.creatingDirectories.set(dir, promise);
 
-        promise.finally(() => {
+        const cleanup = () => {
             this.creatingDirectories.delete(dir);
-        });
+        };
+        promise.then(cleanup, cleanup);
 
         return promise;
     }
@@ -554,10 +525,14 @@ export class FTP extends Target implements TargetInterface {
     }
 
     destroy() {
-        if (this.isConnected) {
-            this.client.destroy();
-            this.queue.end();
-            Extension.appendLineToOutputChannel("[INFO][FTP] The connection is destroyed");
+        // Drop the attempt first so the close event doesn't report a failed connect
+        const wasConnecting = this.isConnecting;
+        this.isConnecting = false;
+        if (wasConnecting) {
+            this.resolveConnectWaiters("The target was destroyed");
         }
+        this.client.destroy();
+        this.queue.end();
+        Extension.appendLineToOutputChannel("[INFO][FTP] The connection is destroyed");
     }
 }

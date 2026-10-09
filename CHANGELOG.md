@@ -6,6 +6,26 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [3.7.0]
 
+- **breaking:** FTPS certificates are now validated by default (`secureOptions.rejectUnauthorized` defaults to `true`). Set it to `false` for servers with a self-signed certificate.
+- added SFTP target option `hostFingerprint` to verify the server host key (OpenSSH `SHA256:...` or hex).
+- directories are deleted over SFTP instead of `rm -rf` through a shell, so file names can no longer inject commands. FTP no longer deletes the remote root directory.
+- `Delete` / `Delete From...` ask for confirmation when a directory is included.
+- fixed uploads going to the targets of the active editor's workspace instead of the workspace that owns the file (multi-root).
+- fixed errors on every file event in workspace folders without a valid config file.
+- fixed ignored files and folders (`ignore`, `include`, `.gitignore`) being uploaded when a whole directory is created or uploaded.
+- fixed directory downloads: the queue slot is released correctly, `concurrency: 1` no longer deadlocks, symlinked directories are skipped and names from the server can't escape the workspace.
+- fixed queue slots that stayed busy forever when the SFTP client was missing.
+- fixed listeners piling up on every connect attempt and a target that could never reconnect after a failed SFTP subsystem start.
+- fixed unhandled promise rejections from fire-and-forget operations.
+- fixed commands failing when invoked with a non-object argument.
+- fixed `download-all-files` offering targets of other workspace folders.
+- extensionless files deleted locally are now deleted on the remote even though their type can't be detected.
+- repeated save events no longer queue the same file twice.
+- the config file now accepts comments and trailing commas, and is reloaded when changed outside the editor or when workspace folders change.
+- `.gitignore` is parsed once per change instead of on every file event, and is looked up in the folder of the file.
+- removed the misleading "Keepalive request" log lines; keepalive is still handled by the connection libraries.
+- removed the unneeded `path` dependency.
+
 - added target option `preserveMtime` (FTP/SFTP, default `false`): sets the remote file modification time to the local one after upload. FTP uses the `MFMT` command and requires server support; if it is unsupported a warning is logged and the upload still succeeds (#66).
 
 ## [3.6.0]

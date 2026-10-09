@@ -148,6 +148,7 @@ Instead of a clear-text `password` or `passphrase`, store the value in the OS ke
             "passphrase": null,
             "useAuthAgent": false, //Set to true to enable authentication over SSH agent
             "authAgentPath": null, //Path of the SSH agent socket. If not set, it falls back to ${env:SSH_AUTH_SOCK}
+            "hostFingerprint": null, //Optional host key fingerprint (e.g. "SHA256:..."); the connection is refused on mismatch
             "keepaliveIntervalMs": 10000, //Optional keepalive interval (ms)
             "preserveMtime": false //Set the remote modification time to the local one after upload
         },
@@ -163,7 +164,7 @@ Instead of a clear-text `password` or `passphrase`, store the value in the OS ke
             "transferDataType": "binary",
             "secure": false, //Set to true for explicit FTPS (AUTH TLS) or "implicit" for implicit FTPS (port 990)
             "secureOptions": {
-                "rejectUnauthorized": false //Set to true to reject unauthorized certificates
+                "rejectUnauthorized": true //Defaults to true; set to false only for servers with a self-signed certificate
             },
             "keepaliveIntervalMs": 10000, //Optional keepalive interval (ms)
             "preserveMtime": false //Set the remote modification time to the local one after upload (requires MFMT support on the server)
@@ -187,7 +188,7 @@ Instead of a clear-text `password` or `passphrase`, store the value in the OS ke
 | `baseDir` | string | `"/"` | Local base directory for uploads |
 | `transferDataType` | string | `"binary"` | Transfer mode: `"binary"` or `"ascii"` |
 | `secure` | boolean \| string | `false` | `true` for explicit FTPS (AUTH TLS), `"implicit"` for implicit FTPS |
-| `secureOptions.rejectUnauthorized` | boolean | `false` | Whether to reject unauthorized SSL certificates |
+| `secureOptions.rejectUnauthorized` | boolean | `true` | Whether to reject unauthorized SSL certificates. Set to `false` for self-signed certificates |
 | `keepaliveIntervalMs` | number | - | Keepalive interval in milliseconds |
 | `preserveMtime` | boolean | `false` | Set the remote file modification time to the local one after upload (sent with the `MFMT` command; servers without `MFMT` support are skipped with a warning) |
 
@@ -207,6 +208,7 @@ Instead of a clear-text `password` or `passphrase`, store the value in the OS ke
 | `passphrase` | string | `null` | Passphrase for encrypted private key |
 | `useAuthAgent` | bool | `false` | Enable authentication over SSH auth agent |
 | `authAgentPath` | string | `${env.SSH_AUTH_SOCK}` | Path of the SSH agent socket |
+| `hostFingerprint` | string | - | Expected host key fingerprint, either OpenSSH style `SHA256:...` or hex. The connection is refused on mismatch. Without it the host key is not verified |
 | `keepaliveIntervalMs` | number | - | Keepalive interval in milliseconds |
 | `preserveMtime` | boolean | `false` | Set the remote file modification time to the local one after upload |
 

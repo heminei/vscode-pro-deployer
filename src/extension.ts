@@ -5,7 +5,7 @@ import { SecretManager } from "./SecretManager";
 import fs = require("fs");
 import micromatch = require("micromatch");
 import parser = require("gitignore-parser");
-import { QueueTask } from "./targets/Interfaces";
+import { QueueTask, TargetInterface } from "./targets/Interfaces";
 import { MemFS } from "./fileSystemProvider";
 import { RemoteBrowser } from "./RemoteBrowser";
 import { DirCodeLensProvider } from "./DirCodeLensProvider";
@@ -62,30 +62,46 @@ export class Extension {
         });
     }
 
-    public static isLikeFile(uri: vscode.Uri): Promise<boolean> {
-        return new Promise<boolean>((resolve, reject) => {
-            vscode.workspace.fs.stat(uri).then(
-                (fileStat) => {
-                    if (fileStat.type === vscode.FileType.File) {
-                        resolve(true);
-                    } else {
-                        resolve(false);
-                    }
-                },
-                (reason) => {
-                    let name = uri.toString().split("/").pop();
-                    if (!name) {
-                        reject("Can't get file or folder name");
-                        return;
-                    }
-                    if (name.split(".").length > 1) {
-                        resolve(true);
-                    } else {
-                        resolve(false);
-                    }
-                }
-            );
-        });
+    public static async getKind(uri: vscode.Uri): Promise<"file" | "dir" | "unknown"> {
+        try {
+            const fileStat = await vscode.workspace.fs.stat(uri);
+            // Bit test, because a symlink reports e.g. File | SymbolicLink
+            return fileStat.type & vscode.FileType.Directory ? "dir" : "file";
+        } catch {
+            return "unknown";
+        }
+    }
+
+    public static async isLikeFile(uri: vscode.Uri): Promise<boolean> {
+        const kind = await Extension.getKind(uri);
+        if (kind !== "unknown") {
+            return kind === "file";
+        }
+        // The path doesn't exist locally (e.g. already deleted), so guess from the name
+        const name = uri.toString().split("/").pop();
+        if (!name) {
+            throw new Error("Can't get file or folder name");
+        }
+        return name.split(".").length > 1;
+    }
+
+    private static gitignoreCache = new Map<string, { mtimeMs: number; parsed: ReturnType<typeof parser.compile> }>();
+
+    // Compiled once per .gitignore version; this runs for every file event
+    private static getGitignore(uri: vscode.Uri): ReturnType<typeof parser.compile> | undefined {
+        const file = Configs.getGitignoreFile(uri).fsPath;
+        try {
+            const mtimeMs = fs.statSync(file).mtimeMs;
+            const cached = Extension.gitignoreCache.get(file);
+            if (cached && cached.mtimeMs === mtimeMs) {
+                return cached.parsed;
+            }
+            const parsed = parser.compile(fs.readFileSync(file).toString());
+            Extension.gitignoreCache.set(file, { mtimeMs, parsed });
+            return parsed;
+        } catch {
+            return undefined;
+        }
     }
 
     // Command args carry this marker when the "filtered" command variants delegate to the base commands.
@@ -99,7 +115,7 @@ export class Extension {
     }
 
     public static isUriIgnored(uri: vscode.Uri, isDirectory: boolean = false, quiet: boolean = false): boolean {
-        const relativePath = vscode.workspace.asRelativePath(uri.path);
+        const relativePath = vscode.workspace.asRelativePath(uri, false);
         const log = (message: string) => {
             if (!quiet) {
                 Extension.appendLineToOutputChannel(message);
@@ -110,11 +126,12 @@ export class Extension {
             log("File ignored (git): " + relativePath);
             return true;
         }
-        if (uri.path === Configs.getConfigFile().path) {
+        if (uri.path === Configs.getConfigFile(uri).path) {
             log("File ignored (config file)");
             return true;
         }
-        const ignorePatterns = Configs.getWorkspaceConfigs(uri).ignore;
+        const configs = Configs.getWorkspaceConfigs(uri);
+        const ignorePatterns = configs.ignore;
         // Patterns like "logs/**/*" only match children, so probe the directory with a fake child.
         if (
             micromatch.isMatch(relativePath, ignorePatterns, { dot: true }) ||
@@ -124,23 +141,166 @@ export class Extension {
             return true;
         }
         // A directory can't be tested against include patterns (e.g. "src/**/*.ts"), its files are tested instead.
-        if (!isDirectory && Configs.getWorkspaceConfigs(uri).include.length > 0) {
-            if (micromatch.isMatch(relativePath, Configs.getWorkspaceConfigs(uri).include, { dot: true }) === false) {
+        if (!isDirectory && configs.include.length > 0) {
+            if (micromatch.isMatch(relativePath, configs.include, { dot: true }) === false) {
                 log("File/folder not included (include option): " + relativePath);
                 return true;
             }
         }
-        if (Configs.getWorkspaceConfigs(uri).checkGitignore) {
-            if (fs.existsSync(Configs.getGitignoreFile().path)) {
-                if (parser.compile(fs.readFileSync(Configs.getGitignoreFile().path).toString()).denies(relativePath)) {
-                    log("File ignored (.gitignore): " + relativePath);
-                    return true;
-                }
+        if (configs.checkGitignore) {
+            if (Extension.getGitignore(uri)?.denies(relativePath)) {
+                log("File ignored (.gitignore): " + relativePath);
+                return true;
             }
         }
         return false;
     }
 }
+
+function collectUris(args: any[]): vscode.Uri[] {
+    const uris = new Map<string, vscode.Uri>();
+    const add = (value: unknown) => {
+        if (value instanceof vscode.Uri) {
+            uris.set(value.toString(), value);
+        }
+    };
+    args.forEach((arg) => {
+        if (Array.isArray(arg)) {
+            arg.forEach(add);
+        } else if (arg instanceof vscode.Uri) {
+            add(arg);
+        } else if (typeof arg === "object" && arg !== null && "resourceUri" in arg) {
+            add(arg.resourceUri);
+        }
+    });
+    if (uris.size === 0) {
+        add(vscode.window.activeTextEditor?.document.uri);
+    }
+    return [...uris.values()];
+}
+
+function targetQuickPickItems(targets: TargetInterface[]) {
+    return targets.map((item) => ({
+        label: item.getName(),
+        description: item.getWorkspaceFolder().name,
+        target: item,
+    }));
+}
+
+// Task failures are reported through the queue; this only keeps rejected promises from going unhandled
+function logFailure(what: string) {
+    return (reason: unknown) => {
+        Extension.appendLineToOutputChannel("[ERROR] " + what + ": " + reason);
+    };
+}
+
+function queueUpload(target: TargetInterface, uri: vscode.Uri) {
+    const key = uri.toString();
+    // One save can fire several watcher events; one pending upload is enough
+    const alreadyQueued = target
+        .getQueue()
+        .getPendingTasks()
+        .some((task) => task.action === "upload" && task.uri.toString() === key);
+    if (alreadyQueued) {
+        return;
+    }
+    target.upload(uri).catch(logFailure("Can't upload " + uri.path));
+}
+
+function uploadUris(target: TargetInterface, uris: vscode.Uri[]) {
+    target.connect(() => {
+        uris.forEach(async (uri) => {
+            try {
+                if (await Extension.isLikeFile(uri)) {
+                    queueUpload(target, uri);
+                    return;
+                }
+                const folder = target.getWorkspaceFolder();
+                const relative = vscode.workspace.asRelativePath(uri, false);
+                const prefix = uri.path === folder.uri.path ? "" : relative + "/";
+                const files = await vscode.workspace.findFiles(new vscode.RelativePattern(folder, prefix + "**/*"));
+                files.forEach((file) => {
+                    // findFiles only knows files.exclude, so the extension's own ignore rules are applied here
+                    if (!Extension.isUriIgnored(file, false, true)) {
+                        queueUpload(target, file);
+                    }
+                });
+            } catch (error) {
+                logFailure("Can't upload " + uri.path)(error);
+            }
+        });
+    }, logFailure("Can't connect to " + target.getName()));
+}
+
+async function deleteUri(target: TargetInterface, uri: vscode.Uri) {
+    const kind = await Extension.getKind(uri);
+    if (kind === "dir") {
+        await target.deleteDir(uri);
+    } else if (kind === "file") {
+        await target.delete(uri);
+    } else {
+        // Already gone locally, so file vs. directory is unknown; unlink fails harmlessly on a directory
+        try {
+            await target.delete(uri, { quiet: true });
+        } catch {
+            await target.deleteDir(uri);
+        }
+    }
+}
+
+async function confirmDelete(uris: vscode.Uri[], targetName: string): Promise<boolean> {
+    const kinds = await Promise.all(uris.map((uri) => Extension.getKind(uri)));
+    if (!kinds.includes("dir")) {
+        return true;
+    }
+    const answer = await vscode.window.showWarningMessage(
+        "Delete " + uris.length + " item(s), including directories, from '" + targetName + "'? This can't be undone.",
+        { modal: true },
+        "Delete"
+    );
+    return answer === "Delete";
+}
+
+function deleteUris(target: TargetInterface, uris: vscode.Uri[]) {
+    confirmDelete(uris, target.getName()).then((confirmed) => {
+        if (!confirmed) {
+            return;
+        }
+        target.connect(() => {
+            uris.forEach((uri) => {
+                deleteUri(target, uri).catch(logFailure("Can't delete " + uri.path));
+            });
+        }, logFailure("Can't connect to " + target.getName()));
+    });
+}
+
+function downloadUris(target: TargetInterface, uris: vscode.Uri[], ignoreMode: { forFile: boolean; forDir: boolean }) {
+    target.connect(() => {
+        uris.forEach((uri) => {
+            Extension.isLikeFile(uri).then((isFile) => {
+                const download = isFile
+                    ? target.download(uri, undefined, ignoreMode.forFile)
+                    : target.downloadDir(uri, ignoreMode.forDir);
+                download.catch(logFailure("Can't download " + uri.path));
+            }, logFailure("Can't download " + uri.path));
+        });
+    }, logFailure("Can't connect to " + target.getName()));
+}
+
+function describeJob(job: QueueTask, target: TargetInterface, prefix = "") {
+    return (
+        job.action[0].toUpperCase() +
+        job.action.slice(1) +
+        " (" +
+        (target.getQueue().getPendingTasks().length + 1) +
+        " pending) => " +
+        prefix +
+        vscode.workspace.asRelativePath(job.uri)
+    );
+}
+
+let statusBarCheckTimer: NodeJS.Timeout | undefined;
+let tooltipText = "";
 
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
@@ -151,7 +311,11 @@ export function activate(context: vscode.ExtensionContext) {
 
     Configs.init(() => {
         Targets.destroyAllTargets();
+        // A timer from the previous config load would otherwise keep running
+        clearInterval(statusBarCheckTimer);
+        statusBarCheckTimer = undefined;
         Extension.statusBarItem?.dispose();
+        Extension.statusBarItem = null;
 
         Configs.getAllTargetOptions().forEach((targetOption) => {
             let target = Targets.getTargetInstance(targetOption.options, targetOption.workspaceFolder);
@@ -167,17 +331,15 @@ export function activate(context: vscode.ExtensionContext) {
             Extension.statusBarItem.show();
         }
 
-        let statusBarCheckTimer: NodeJS.Timeout | undefined = undefined;
-        let tooltipText = "";
         Targets.getItems().forEach((target) => {
             target.getQueue().on("start", () => {
-                if (Configs.getConfigs().enableStatusBarItem) {
+                if (Extension.statusBarItem) {
                     Extension.statusBarItem!.text = "$(sync~spin) PRO Deployer";
 
                     if (!statusBarCheckTimer) {
                         statusBarCheckTimer = setInterval(() => {
                             let allPendingTasks = 0;
-                            Targets.getActive().forEach((target) => {
+                            Targets.getItems().forEach((target) => {
                                 allPendingTasks += target.getQueue().getPendingTasks().length;
                             });
                             if (allPendingTasks > 1) {
@@ -200,33 +362,14 @@ export function activate(context: vscode.ExtensionContext) {
                                 target.getQueue().end();
                             });
                             return new Promise<boolean>((resolve, reject) => {
-                                const onStartCallback = (job: QueueTask) => {
-                                    progress.report({
-                                        message:
-                                            job.action[0].toUpperCase() +
-                                            job.action.slice(1) +
-                                            " (" +
-                                            (target.getQueue().getPendingTasks().length + 1) +
-                                            " pending) => " +
-                                            vscode.workspace.asRelativePath(job.uri),
-                                    });
+                                const onJobDone = (job: QueueTask) => {
+                                    progress.report({ message: describeJob(job, target) });
                                 };
-                                const onErrorCallback = (job: QueueTask) => {
-                                    progress.report({
-                                        message:
-                                            job.action[0].toUpperCase() +
-                                            job.action.slice(1) +
-                                            " (" +
-                                            (target.getQueue().getPendingTasks().length + 1) +
-                                            " pending) => " +
-                                            vscode.workspace.asRelativePath(job.uri),
-                                    });
-                                };
-                                target.getQueue().on("task.success", onStartCallback);
-                                target.getQueue().on("task.error", onErrorCallback);
+                                target.getQueue().on("task.success", onJobDone);
+                                target.getQueue().on("task.error", onJobDone);
                                 target.getQueue().once("end", () => {
-                                    target.getQueue().off("task.success", onStartCallback);
-                                    target.getQueue().off("task.error", onErrorCallback);
+                                    target.getQueue().off("task.success", onJobDone);
+                                    target.getQueue().off("task.error", onJobDone);
                                     setTimeout(() => {
                                         resolve(true);
                                     }, 500);
@@ -237,9 +380,9 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             });
             target.getQueue().on("end", () => {
-                if (Configs.getConfigs().enableStatusBarItem) {
+                if (Extension.statusBarItem) {
                     let allPendingTasks = 0;
-                    Targets.getActive().forEach((target) => {
+                    Targets.getItems().forEach((target) => {
                         allPendingTasks += target.getQueue().getPendingTasks().length;
                     });
 
@@ -255,18 +398,15 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             });
             target.getQueue().on("task.success", (job: QueueTask) => {
-                if (Configs.getConfigs().enableStatusBarItem) {
-                    Extension.statusBarItem!.backgroundColor = undefined;
-                    tooltipText =
-                        job.action[0].toUpperCase() +
-                        job.action.slice(1) +
-                        " (" +
-                        (target.getQueue().getPendingTasks().length + 1) +
-                        " pending) => " +
-                        vscode.workspace.asRelativePath(job.uri);
+                if (Extension.statusBarItem) {
+                    Extension.statusBarItem.backgroundColor = undefined;
+                    tooltipText = describeJob(job, target);
                 }
             });
             target.getQueue().on("task.error", (job: QueueTask, error: string) => {
+                if (job.quiet) {
+                    return;
+                }
                 if (!Extension.getLastErrorMessageTime() || Date.now() - Extension.getLastErrorMessageTime() >= 1000) {
                     Extension.showErrorMessage(
                         target.getName() +
@@ -278,15 +418,9 @@ export function activate(context: vscode.ExtensionContext) {
                             error
                     );
                 }
-                if (Configs.getConfigs().enableStatusBarItem) {
-                    Extension.statusBarItem!.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
-                    tooltipText =
-                        job.action[0].toUpperCase() +
-                        job.action.slice(1) +
-                        " (" +
-                        (target.getQueue().getPendingTasks().length + 1) +
-                        " pending) => ERROR: " +
-                        vscode.workspace.asRelativePath(job.uri);
+                if (Extension.statusBarItem) {
+                    Extension.statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
+                    tooltipText = describeJob(job, target, "ERROR: ");
                 }
             });
         });
@@ -294,64 +428,24 @@ export function activate(context: vscode.ExtensionContext) {
 
     const fileWatcher = vscode.workspace.createFileSystemWatcher("**/*");
 
-    fileWatcher.onDidCreate((uri) => {
-        // console.log("onDidCreate", uri);
+    // Targets come from the folder that owns the file, not from the active editor
+    const uploadOnEvent = async (uri: vscode.Uri, includeDirectories: boolean) => {
         if (Configs.getWorkspaceConfigs(uri).uploadOnSave === false) {
             return;
         }
         if (Extension.isUriIgnored(uri)) {
             return;
         }
-        Targets.getActive().forEach((target) => {
-            target.connect(() => {
-                Extension.isLikeFile(uri).then((isFile) => {
-                    if (isFile) {
-                        target.upload(uri);
-                    } else {
-                        const includePattern = new vscode.RelativePattern(
-                            target.getWorkspaceFolder(),
-                            vscode.workspace.asRelativePath(uri, false) + "/**/*"
-                        );
-                        vscode.workspace.findFiles(includePattern).then((files) => {
-                            files.forEach((uri) => {
-                                target.upload(uri);
-                            });
-                        });
-                    }
-                });
-            });
-        });
-    });
-    fileWatcher.onDidChange((uri) => {
-        // console.log("onDidChange", uri);
-        if (Configs.getWorkspaceConfigs(uri).uploadOnSave === false) {
+        const targets = Targets.getActiveForUri(uri);
+        // A change event on a directory would re-upload everything inside it
+        if (targets.length === 0 || (!includeDirectories && (await Extension.getKind(uri)) === "dir")) {
             return;
         }
-        if (Extension.isUriIgnored(uri)) {
-            return;
-        }
-        Targets.getActive().forEach((target) => {
-            target.connect(() => {
-                Extension.isLikeFile(uri).then((isFile) => {
-                    if (isFile) {
-                        target.upload(uri);
-                    } else {
-                        const includePattern = new vscode.RelativePattern(
-                            target.getWorkspaceFolder(),
-                            vscode.workspace.asRelativePath(uri, false) + "/**/*"
-                        );
-                        vscode.workspace.findFiles(includePattern).then((files) => {
-                            files.forEach((uri) => {
-                                target.upload(uri);
-                            });
-                        });
-                    }
-                });
-            });
-        });
-    });
+        targets.forEach((target) => uploadUris(target, [uri]));
+    };
+    fileWatcher.onDidCreate((uri) => uploadOnEvent(uri, true).catch(logFailure("Can't handle " + uri.path)));
+    fileWatcher.onDidChange((uri) => uploadOnEvent(uri, false).catch(logFailure("Can't handle " + uri.path)));
     fileWatcher.onDidDelete((uri) => {
-        // console.log("onDidDelete", uri);
         if (Configs.getWorkspaceConfigs(uri).autoDelete === false) {
             return;
         }
@@ -359,21 +453,10 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        Targets.getActive().forEach((target) => {
+        Targets.getActiveForUri(uri).forEach((target) => {
             target.connect(() => {
-                Extension.isLikeFile(uri).then(
-                    (isFile) => {
-                        if (isFile) {
-                            target.delete(uri);
-                        } else {
-                            target.deleteDir(uri);
-                        }
-                    },
-                    (reason) => {
-                        Extension.appendLineToOutputChannel("[ERROR] " + reason);
-                    }
-                );
-            });
+                deleteUri(target, uri).catch(logFailure("Can't delete " + uri.path));
+            }, logFailure("Can't connect to " + target.getName()));
         });
     });
 
@@ -460,173 +543,53 @@ export function activate(context: vscode.ExtensionContext) {
     );
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.upload-to", (...args) => {
-            const URIs = [] as vscode.Uri[];
-            let targetName: string | undefined;
-
-            args.forEach((arg) => {
-                if (arg instanceof vscode.Uri) {
-                    const checkExist = URIs.find((item) => {
-                        return item.toString() === arg.toString();
-                    });
-                    if (!checkExist) {
-                        URIs.push(arg);
-                    }
-                }
-                if ("resourceUri" in arg) {
-                    const checkExist = URIs.find((item) => {
-                        return item.toString() === arg.resourceUri.toString();
-                    });
-                    if (!checkExist) {
-                        URIs.push(arg.resourceUri);
-                    }
-                }
-                if (Array.isArray(arg)) {
-                    arg.forEach((uri) => {
-                        if (uri instanceof vscode.Uri) {
-                            const checkExist = URIs.find((item) => {
-                                return item.toString() === uri.toString();
-                            });
-                            if (!checkExist) {
-                                URIs.push(uri);
-                            }
-                        }
-                    });
-                }
-                if (typeof arg === "object" && arg !== null && "target" in arg && typeof arg.target === "string") {
-                    targetName = arg.target;
-                }
-            });
-            if (URIs.length === 0 && vscode.window.activeTextEditor?.document.uri) {
-                URIs.push(vscode.window.activeTextEditor?.document.uri);
-            }
+            const URIs = collectUris(args);
+            const targetArg = args.find(
+                (arg) => typeof arg === "object" && arg !== null && typeof arg.target === "string"
+            );
+            const targetName: string | undefined = targetArg?.target;
             if (URIs.length === 0) {
                 Extension.showErrorMessage("Can't find files for uploading");
                 return;
             }
 
-            const performUpload = (target: any) => {
-                target.connect(() => {
-                    URIs.forEach((uri) => {
-                        Extension.isLikeFile(uri).then((isFile) => {
-                            if (isFile) {
-                                target.upload(uri);
-                            } else {
-                                const includePattern = new vscode.RelativePattern(
-                                    target.getWorkspaceFolder(),
-                                    vscode.workspace.asRelativePath(uri, false) + "/**/*"
-                                );
-                                vscode.workspace.findFiles(includePattern).then((files) => {
-                                    files.forEach((uri) => {
-                                        target.upload(uri);
-                                    });
-                                });
-                            }
-                        });
-                    });
-                });
-            };
-
-            const availableTargets = Targets.getItems().filter((item) => {
-                if (Extension.getActiveWorkspaceFolder()?.uri.path !== item.getWorkspaceFolder().uri.path) {
-                    return false;
-                }
-                return true;
-            });
+            const folder = vscode.workspace.getWorkspaceFolder(URIs[0]) ?? Extension.getActiveWorkspaceFolder();
+            const availableTargets = Targets.getItems().filter(
+                (item) => item.getWorkspaceFolder().uri.path === folder?.uri.path
+            );
 
             if (targetName) {
                 const target = availableTargets.find((t) => t.getName() === targetName);
                 if (target) {
-                    performUpload(target);
-                    return;
+                    uploadUris(target, URIs);
                 } else {
                     Extension.showErrorMessage(`Target '${targetName}' not found in active workspace.`);
-                    return;
                 }
+                return;
             }
 
-            const items = availableTargets.map((item) => {
-                return {
-                    label: item.getName(),
-                    description: item.getWorkspaceFolder().name,
-                    target: item,
-                };
-            });
-            vscode.window.showQuickPick(items).then((value) => {
-                if (!value) {
-                    return;
+            vscode.window.showQuickPick(targetQuickPickItems(availableTargets)).then((value) => {
+                if (value) {
+                    uploadUris(value.target, URIs);
                 }
-
-                performUpload(value.target);
             });
         })
     );
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.upload", (...args) => {
-            const URIs = [] as vscode.Uri[];
-            args.forEach((arg) => {
-                if (arg instanceof vscode.Uri) {
-                    const checkExist = URIs.find((item) => {
-                        return item.toString() === arg.toString();
-                    });
-                    if (!checkExist) {
-                        URIs.push(arg);
-                    }
-                }
-                if ("resourceUri" in arg) {
-                    const checkExist = URIs.find((item) => {
-                        return item.toString() === arg.resourceUri.toString();
-                    });
-                    if (!checkExist) {
-                        URIs.push(arg.resourceUri);
-                    }
-                }
-                if (Array.isArray(arg)) {
-                    arg.forEach((uri) => {
-                        if (uri instanceof vscode.Uri) {
-                            const checkExist = URIs.find((item) => {
-                                return item.toString() === uri.toString();
-                            });
-                            if (!checkExist) {
-                                URIs.push(uri);
-                            }
-                        }
-                    });
-                }
-            });
-            if (URIs.length === 0 && vscode.window.activeTextEditor?.document.uri) {
-                URIs.push(vscode.window.activeTextEditor?.document.uri);
-            }
+            const URIs = collectUris(args);
             if (URIs.length === 0) {
                 Extension.showErrorMessage("Can't find files for uploading");
                 return;
             }
 
-            if (Targets.getActive().length === 0) {
+            const targets = Targets.getActiveForUri(URIs[0]);
+            if (targets.length === 0) {
                 Extension.showErrorMessage("No active targets");
                 return;
             }
 
-            Targets.getActive().forEach((target) => {
-                target.connect(() => {
-                    URIs.forEach((uri) => {
-                        Extension.isLikeFile(uri).then((isFile) => {
-                            if (isFile) {
-                                target.upload(uri);
-                            } else {
-                                const includePattern = new vscode.RelativePattern(
-                                    target.getWorkspaceFolder(),
-                                    vscode.workspace.asRelativePath(uri, false) + "/**/*"
-                                );
-                                vscode.workspace.findFiles(includePattern).then((files) => {
-                                    files.forEach((uri) => {
-                                        target.upload(uri);
-                                    });
-                                });
-                            }
-                        });
-                    });
-                });
-            });
+            targets.forEach((target) => uploadUris(target, URIs));
         })
     );
     context.subscriptions.push(
@@ -646,15 +609,7 @@ export function activate(context: vscode.ExtensionContext) {
                 });
             });
 
-            const items = Targets.getItems().map((item) => {
-                return {
-                    label: item.getName(),
-                    description: item.getWorkspaceFolder().name,
-                    target: item,
-                };
-            });
-
-            vscode.window.showQuickPick(items).then((value) => {
+            vscode.window.showQuickPick(targetQuickPickItems(Targets.getItems())).then((value) => {
                 if (!value) {
                     return;
                 }
@@ -670,9 +625,9 @@ export function activate(context: vscode.ExtensionContext) {
                             );
                             return;
                         }
-                        target.upload(uri);
+                        queueUpload(target, uri);
                     });
-                });
+                }, logFailure("Can't connect to " + target.getName()));
             });
         })
     );
@@ -688,8 +643,9 @@ export function activate(context: vscode.ExtensionContext) {
                 vscode.window.showErrorMessage("Git extension is not enabled.");
                 return;
             }
-            // Get the active repository (if any)
-            const repo = git.repositories[0];
+            // Prefer the repository of the active workspace folder
+            const activeFolderPath = Extension.getActiveWorkspaceFolder()?.uri.path;
+            const repo = git.repositories.find((item) => item.rootUri.path === activeFolderPath) ?? git.repositories[0];
             if (!repo) {
                 vscode.window.showErrorMessage("No Git repository found.");
                 return;
@@ -702,15 +658,7 @@ export function activate(context: vscode.ExtensionContext) {
                 URIs.push(change.uri);
             });
 
-            const items = Targets.getItems().map((item) => {
-                return {
-                    label: item.getName(),
-                    description: item.getWorkspaceFolder().name,
-                    target: item,
-                };
-            });
-
-            vscode.window.showQuickPick(items).then((value) => {
+            vscode.window.showQuickPick(targetQuickPickItems(Targets.getItems())).then((value) => {
                 if (!value) {
                     return;
                 }
@@ -729,71 +677,26 @@ export function activate(context: vscode.ExtensionContext) {
                             );
                             return;
                         }
-                        target.upload(uri);
+                        queueUpload(target, uri);
                     });
-                });
+                }, logFailure("Can't connect to " + target.getName()));
             });
         })
     );
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.download", (...args) => {
-            const URIs = [] as vscode.Uri[];
-            args.forEach((arg) => {
-                if (arg instanceof vscode.Uri) {
-                    const checkExist = URIs.find((item) => {
-                        return item.toString() === arg.toString();
-                    });
-                    if (!checkExist) {
-                        URIs.push(arg);
-                    }
-                }
-                if ("resourceUri" in arg) {
-                    const checkExist = URIs.find((item) => {
-                        return item.toString() === arg.resourceUri.toString();
-                    });
-                    if (!checkExist) {
-                        URIs.push(arg.resourceUri);
-                    }
-                }
-                if (Array.isArray(arg)) {
-                    arg.forEach((uri) => {
-                        if (uri instanceof vscode.Uri) {
-                            const checkExist = URIs.find((item) => {
-                                return item.toString() === uri.toString();
-                            });
-                            if (!checkExist) {
-                                URIs.push(uri);
-                            }
-                        }
-                    });
-                }
-            });
-            if (URIs.length === 0 && vscode.window.activeTextEditor?.document.uri) {
-                URIs.push(vscode.window.activeTextEditor?.document.uri);
-            }
+            const URIs = collectUris(args);
             if (URIs.length === 0) {
                 Extension.showErrorMessage("Can't find files for downloading");
                 return;
             }
-            if (Targets.getActive().length === 0) {
+            const target = Targets.getActiveForUri(URIs[0])[0];
+            if (!target) {
                 Extension.showErrorMessage("No active targets");
                 return;
             }
 
-            const target = Targets.getActive()[0];
-            const ignoreMode = Extension.getDownloadIgnoreMode(args, target);
-
-            target.connect(() => {
-                URIs.forEach((uri) => {
-                    Extension.isLikeFile(uri).then((isFile) => {
-                        if (isFile) {
-                            target.download(uri, undefined, ignoreMode.forFile);
-                        } else {
-                            target.downloadDir(uri, ignoreMode.forDir);
-                        }
-                    });
-                });
-            });
+            downloadUris(target, URIs, Extension.getDownloadIgnoreMode(args, target));
         })
     );
     context.subscriptions.push(
@@ -803,71 +706,19 @@ export function activate(context: vscode.ExtensionContext) {
     );
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.download-from", (...args) => {
-            const URIs = [] as vscode.Uri[];
-            args.forEach((arg) => {
-                if (arg instanceof vscode.Uri) {
-                    const checkExist = URIs.find((item) => {
-                        return item.toString() === arg.toString();
-                    });
-                    if (!checkExist) {
-                        URIs.push(arg);
-                    }
-                }
-                if ("resourceUri" in arg) {
-                    const checkExist = URIs.find((item) => {
-                        return item.toString() === arg.resourceUri.toString();
-                    });
-                    if (!checkExist) {
-                        URIs.push(arg.resourceUri);
-                    }
-                }
-                if (Array.isArray(arg)) {
-                    arg.forEach((uri) => {
-                        if (uri instanceof vscode.Uri) {
-                            const checkExist = URIs.find((item) => {
-                                return item.toString() === uri.toString();
-                            });
-                            if (!checkExist) {
-                                URIs.push(uri);
-                            }
-                        }
-                    });
-                }
-            });
-            if (URIs.length === 0 && vscode.window.activeTextEditor?.document.uri) {
-                URIs.push(vscode.window.activeTextEditor?.document.uri);
-            }
+            const URIs = collectUris(args);
             if (URIs.length === 0) {
                 Extension.showErrorMessage("Can't find files for downloading");
                 return;
             }
 
-            const items = Targets.getItems().map((item) => {
-                return {
-                    label: item.getName(),
-                    description: item.getWorkspaceFolder().name,
-                    target: item,
-                };
-            });
-            vscode.window.showQuickPick(items).then((value) => {
+            vscode.window.showQuickPick(targetQuickPickItems(Targets.getItems())).then((value) => {
                 if (!value) {
                     return;
                 }
 
                 const target = value.target;
-                const ignoreMode = Extension.getDownloadIgnoreMode(args, target);
-
-                target.connect(() => {
-                    URIs.forEach((uri) => {
-                        Extension.isLikeFile(uri).then((isFile) => {
-                            if (isFile) {
-                                target.download(uri, undefined, ignoreMode.forFile);
-                            } else {
-                                target.downloadDir(uri, ignoreMode.forDir);
-                            }
-                        });
-                    });
-                });
+                downloadUris(target, URIs, Extension.getDownloadIgnoreMode(args, target));
             });
         })
     );
@@ -885,13 +736,10 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            const items = Targets.getItems().map((item) => {
-                return {
-                    label: item.getName(),
-                    description: item.getWorkspaceFolder().name,
-                    target: item,
-                };
-            });
+            // Only targets of this workspace folder, or the remote would be downloaded into the wrong folder
+            const items = targetQuickPickItems(
+                Targets.getItems().filter((item) => item.getWorkspaceFolder().uri.path === workspaceFolder.uri.path)
+            );
             vscode.window.showQuickPick(items).then((value) => {
                 if (!value) {
                     return;
@@ -901,8 +749,10 @@ export function activate(context: vscode.ExtensionContext) {
                 const ignoreMode = Extension.getDownloadIgnoreMode(args, target);
 
                 target.connect(() => {
-                    target.downloadDir(workspaceFolder.uri, ignoreMode.forDir);
-                });
+                    target
+                        .downloadDir(workspaceFolder.uri, ignoreMode.forDir)
+                        .catch(logFailure("Can't download " + workspaceFolder.uri.path));
+                }, logFailure("Can't connect to " + target.getName()));
             });
         })
     );
@@ -913,130 +763,32 @@ export function activate(context: vscode.ExtensionContext) {
     );
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.delete", (...args) => {
-            const URIs = [] as vscode.Uri[];
-            args.forEach((arg) => {
-                if (arg instanceof vscode.Uri) {
-                    const checkExist = URIs.find((item) => {
-                        return item.toString() === arg.toString();
-                    });
-                    if (!checkExist) {
-                        URIs.push(arg);
-                    }
-                }
-                if ("resourceUri" in arg) {
-                    const checkExist = URIs.find((item) => {
-                        return item.toString() === arg.resourceUri.toString();
-                    });
-                    if (!checkExist) {
-                        URIs.push(arg.resourceUri);
-                    }
-                }
-                if (Array.isArray(arg)) {
-                    arg.forEach((uri) => {
-                        if (uri instanceof vscode.Uri) {
-                            const checkExist = URIs.find((item) => {
-                                return item.toString() === uri.toString();
-                            });
-                            if (!checkExist) {
-                                URIs.push(uri);
-                            }
-                        }
-                    });
-                }
-            });
-            if (URIs.length === 0 && vscode.window.activeTextEditor?.document.uri) {
-                URIs.push(vscode.window.activeTextEditor?.document.uri);
-            }
+            const URIs = collectUris(args);
             if (URIs.length === 0) {
                 Extension.showErrorMessage("Can't find files for deleting");
                 return;
             }
-            if (Targets.getActive().length === 0) {
+            const target = Targets.getActiveForUri(URIs[0])[0];
+            if (!target) {
                 Extension.showErrorMessage("No active targets");
                 return;
             }
 
-            const target = Targets.getActive()[0];
-
-            target.connect(() => {
-                URIs.forEach((uri) => {
-                    Extension.isLikeFile(uri).then((isFile) => {
-                        if (isFile) {
-                            target.delete(uri);
-                        } else {
-                            target.deleteDir(uri);
-                        }
-                    });
-                });
-            });
+            deleteUris(target, URIs);
         })
     );
     context.subscriptions.push(
         vscode.commands.registerCommand("pro-deployer.delete-from", (...args) => {
-            const URIs = [] as vscode.Uri[];
-            args.forEach((arg) => {
-                if (arg instanceof vscode.Uri) {
-                    const checkExist = URIs.find((item) => {
-                        return item.toString() === arg.toString();
-                    });
-                    if (!checkExist) {
-                        URIs.push(arg);
-                    }
-                }
-                if ("resourceUri" in arg) {
-                    const checkExist = URIs.find((item) => {
-                        return item.toString() === arg.resourceUri.toString();
-                    });
-                    if (!checkExist) {
-                        URIs.push(arg.resourceUri);
-                    }
-                }
-                if (Array.isArray(arg)) {
-                    arg.forEach((uri) => {
-                        if (uri instanceof vscode.Uri) {
-                            const checkExist = URIs.find((item) => {
-                                return item.toString() === uri.toString();
-                            });
-                            if (!checkExist) {
-                                URIs.push(uri);
-                            }
-                        }
-                    });
-                }
-            });
-            if (URIs.length === 0 && vscode.window.activeTextEditor?.document.uri) {
-                URIs.push(vscode.window.activeTextEditor?.document.uri);
-            }
+            const URIs = collectUris(args);
             if (URIs.length === 0) {
                 Extension.showErrorMessage("Can't find files for deleting");
                 return;
             }
 
-            const items = Targets.getItems().map((item) => {
-                return {
-                    label: item.getName(),
-                    description: item.getWorkspaceFolder().name,
-                    target: item,
-                };
-            });
-            vscode.window.showQuickPick(items).then((value) => {
-                if (!value) {
-                    return;
+            vscode.window.showQuickPick(targetQuickPickItems(Targets.getItems())).then((value) => {
+                if (value) {
+                    deleteUris(value.target, URIs);
                 }
-
-                const target = value.target;
-
-                target.connect(() => {
-                    URIs.forEach((uri) => {
-                        Extension.isLikeFile(uri).then((isFile) => {
-                            if (isFile) {
-                                target.delete(uri);
-                            } else {
-                                target.deleteDir(uri);
-                            }
-                        });
-                    });
-                });
             });
         })
     );
@@ -1048,54 +800,14 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            const URIs = [] as vscode.Uri[];
-            args.forEach((arg) => {
-                if (arg instanceof vscode.Uri) {
-                    const checkExist = URIs.find((item) => {
-                        return item.toString() === arg.toString();
-                    });
-                    if (!checkExist) {
-                        URIs.push(arg);
-                    }
-                }
-                if ("resourceUri" in arg) {
-                    const checkExist = URIs.find((item) => {
-                        return item.toString() === arg.resourceUri.toString();
-                    });
-                    if (!checkExist) {
-                        URIs.push(arg.resourceUri);
-                    }
-                }
-                if (Array.isArray(arg)) {
-                    arg.forEach((uri) => {
-                        if (uri instanceof vscode.Uri) {
-                            const checkExist = URIs.find((item) => {
-                                return item.toString() === uri.toString();
-                            });
-                            if (!checkExist) {
-                                URIs.push(uri);
-                            }
-                        }
-                    });
-                }
-            });
-            if (URIs.length === 0 && vscode.window.activeTextEditor?.document.uri) {
-                URIs.push(vscode.window.activeTextEditor?.document.uri);
-            }
+            const URIs = collectUris(args);
             if (URIs.length !== 1) {
                 Extension.showErrorMessage("Select one file for diff");
                 return;
             }
             const uri = URIs[0];
 
-            const items = Targets.getItems().map((item) => {
-                return {
-                    label: item.getName(),
-                    description: item.getWorkspaceFolder().name,
-                    target: item,
-                };
-            });
-            vscode.window.showQuickPick(items).then((value) => {
+            vscode.window.showQuickPick(targetQuickPickItems(Targets.getItems())).then((value) => {
                 if (!value) {
                     return;
                 }
@@ -1104,18 +816,16 @@ export function activate(context: vscode.ExtensionContext) {
 
                 target.connect(() => {
                     Extension.isLikeFile(uri).then((isFile) => {
-                        if (isFile) {
-                            let destination = vscode.Uri.parse(
-                                "pro-deployer-fs:/" + vscode.workspace.asRelativePath(uri)
-                            );
-                            target.download(uri, destination).then(() => {
-                                vscode.commands.executeCommand("vscode.diff", destination, uri);
-                            });
-                        } else {
+                        if (!isFile) {
                             Extension.showErrorMessage("Can't diff directory");
+                            return;
                         }
-                    });
-                });
+                        const destination = vscode.Uri.parse("pro-deployer-fs:/" + vscode.workspace.asRelativePath(uri));
+                        target.download(uri, destination).then(() => {
+                            vscode.commands.executeCommand("vscode.diff", destination, uri);
+                        }, logFailure("Can't diff " + uri.path));
+                    }, logFailure("Can't diff " + uri.path));
+                }, logFailure("Can't connect to " + target.getName()));
             });
         })
     );
@@ -1123,6 +833,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 // this method is called when your extension is deactivated
 export function deactivate() {
+    clearInterval(statusBarCheckTimer);
     Targets.destroyAllTargets();
     if (Extension.outputChannel) {
         Extension.outputChannel.dispose();

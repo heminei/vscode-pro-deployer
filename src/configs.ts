@@ -72,14 +72,20 @@ export class Configs {
     public static getConfigs() {
         return this.configs;
     }
-    public static getConfigFile(): vscode.Uri {
-        return vscode.Uri.file(Extension.getActiveWorkspaceFolder()?.uri.path + "/.vscode/pro-deployer.json");
+    private static getFolderFor(uri?: vscode.Uri): vscode.WorkspaceFolder | null {
+        return (uri ? vscode.workspace.getWorkspaceFolder(uri) : undefined) ?? Extension.getActiveWorkspaceFolder();
+    }
+    public static getConfigFile(uri?: vscode.Uri): vscode.Uri {
+        return vscode.Uri.file(this.getFolderFor(uri)?.uri.path + "/.vscode/pro-deployer.json");
     }
     public static getWorkspaceConfigs(uri?: vscode.Uri): ConfigsInterface {
+        // A folder without a (valid) config file falls back to the defaults instead of undefined
         if (uri) {
             const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
             if (workspaceFolder) {
-                return this.workspaceConfigs[workspaceFolder.uri.path + "/.vscode/pro-deployer.json"];
+                return (
+                    this.workspaceConfigs[workspaceFolder.uri.path + "/.vscode/pro-deployer.json"] ?? this.defaultConfigs
+                );
             }
         }
         const activeEditor = vscode.window.activeTextEditor;
@@ -87,7 +93,9 @@ export class Configs {
             const activeDocumentUri = activeEditor.document.uri;
             const workspaceFolder = vscode.workspace.getWorkspaceFolder(activeDocumentUri);
             if (workspaceFolder) {
-                return this.workspaceConfigs[workspaceFolder.uri.path + "/.vscode/pro-deployer.json"];
+                return (
+                    this.workspaceConfigs[workspaceFolder.uri.path + "/.vscode/pro-deployer.json"] ?? this.defaultConfigs
+                );
             }
         }
         return this.configs;
@@ -109,17 +117,21 @@ export class Configs {
         Object.keys(this.workspaceConfigs).forEach((key) => {
             if (this.workspaceConfigs[key].targets) {
                 this.workspaceConfigs[key].targets.forEach((target) => {
+                    const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(key));
+                    if (!workspaceFolder) {
+                        return;
+                    }
                     targets.push({
                         options: target,
-                        workspaceFolder: vscode.workspace.getWorkspaceFolder(vscode.Uri.file(key))!,
+                        workspaceFolder,
                     });
                 });
             }
         });
         return targets;
     }
-    public static getGitignoreFile(): vscode.Uri {
-        return vscode.Uri.file(Extension.getActiveWorkspaceFolder()?.uri.path + "/.gitignore");
+    public static getGitignoreFile(uri?: vscode.Uri): vscode.Uri {
+        return vscode.Uri.file(this.getFolderFor(uri)?.uri.path + "/.gitignore");
     }
     public static generateConfigFile() {
         if (!Extension.getActiveWorkspaceFolder()) {
@@ -209,6 +221,12 @@ export class Configs {
         if (fileConfigs.ignore) {
             configs.ignore = fileConfigs.ignore;
         }
+        // Guard against null/invalid values from the file, readers expect arrays
+        for (const key of ["ignore", "include", "activeTargets", "targets"] as const) {
+            if (!Array.isArray(configs[key])) {
+                (configs as any)[key] = [];
+            }
+        }
 
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(file);
         if (workspaceFolder) {
@@ -225,12 +243,13 @@ export class Configs {
                 const value = await vscode.workspace.fs.readFile(file);
 
                 let fileConfigs = {} as ConfigsInterface;
-                try {
-                    fileConfigs = JSON.parse(value.toString());
-                } catch (error) {
+                const parseErrors: jsonc.ParseError[] = [];
+                const parsed = jsonc.parse(Buffer.from(value).toString("utf8"), parseErrors, { allowTrailingComma: true });
+                if (parseErrors.length > 0 || typeof parsed !== "object" || parsed === null) {
                     Extension.showErrorMessage("Can't parse config file. Check config syntax.");
                     return;
                 }
+                fileConfigs = parsed;
 
                 const configs = await this.buildConfigs(fileConfigs, file);
                 if (index === 0) {
@@ -259,18 +278,24 @@ export class Configs {
             cb();
         });
 
-        const disposables = vscode.workspace.onDidSaveTextDocument((e) => {
-            const isConfigFile =
-                this.getWorkspaceConfigFiles().findIndex(
-                    (file) =>
-                        vscode.workspace.asRelativePath(e.uri.path) === vscode.workspace.asRelativePath(file.path),
-                ) > -1;
-            if (isConfigFile) {
+        // Covers saves, external edits (git checkout) and a deleted file; debounced because writes fire several events
+        let reloadTimer: NodeJS.Timeout | undefined;
+        const scheduleReload = () => {
+            clearTimeout(reloadTimer);
+            reloadTimer = setTimeout(() => {
                 this.loadAll().finally(() => {
                     cb();
                 });
-            }
-        });
-        Extension.extensionContext.subscriptions.push(disposables);
+            }, 300);
+        };
+        const watcher = vscode.workspace.createFileSystemWatcher("**/.vscode/pro-deployer.json");
+        watcher.onDidChange(scheduleReload);
+        watcher.onDidCreate(scheduleReload);
+        watcher.onDidDelete(scheduleReload);
+        Extension.extensionContext.subscriptions.push(
+            watcher,
+            vscode.workspace.onDidChangeWorkspaceFolders(scheduleReload),
+            { dispose: () => clearTimeout(reloadTimer) }
+        );
     }
 }
