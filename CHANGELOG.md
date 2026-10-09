@@ -4,6 +4,10 @@ All notable changes to the "pro-deployer" extension will be documented in this f
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [3.7.0]
+
+- added target option `preserveMtime` (FTP/SFTP, default `false`): sets the remote file modification time to the local one after upload. FTP uses the `MFMT` command and requires server support; if it is unsupported a warning is logged and the upload still succeeds (#66).
+
 ## [3.6.0]
 
 - fixed bug: `pro-deployer.cancel-all-actions` did not stop a running directory download - it restarted a few seconds later and had to be pressed several times.

@@ -33,6 +33,7 @@ export class Configs {
                 useAuthAgent: false,
                 authAgentPath: null,
                 keepaliveIntervalMs: 10000,
+                preserveMtime: false,
             },
             {
                 name: "My FTP",
@@ -46,6 +47,7 @@ export class Configs {
                 transferDataType: "binary",
                 secure: false,
                 keepaliveIntervalMs: 10000,
+                preserveMtime: false,
             },
         ] as TargetOptionsInterface[],
     };

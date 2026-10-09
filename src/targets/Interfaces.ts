@@ -35,6 +35,9 @@ export interface TargetOptionsInterface {
 
     // Optional keepalive interval in milliseconds
     keepaliveIntervalMs?: number;
+
+    // Set the remote file modification time to the local one after upload (FTP needs server MFMT support)
+    preserveMtime?: boolean;
 }
 
 export interface TargetInterface {

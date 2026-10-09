@@ -148,7 +148,8 @@ Instead of a clear-text `password` or `passphrase`, store the value in the OS ke
             "passphrase": null,
             "useAuthAgent": false, //Set to true to enable authentication over SSH agent
             "authAgentPath": null, //Path of the SSH agent socket. If not set, it falls back to ${env:SSH_AUTH_SOCK}
-            "keepaliveIntervalMs": 10000 //Optional keepalive interval (ms)
+            "keepaliveIntervalMs": 10000, //Optional keepalive interval (ms)
+            "preserveMtime": false //Set the remote modification time to the local one after upload
         },
         {
             "name": "My FTP",
@@ -164,7 +165,8 @@ Instead of a clear-text `password` or `passphrase`, store the value in the OS ke
             "secureOptions": {
                 "rejectUnauthorized": false //Set to true to reject unauthorized certificates
             },
-            "keepaliveIntervalMs": 10000 //Optional keepalive interval (ms)
+            "keepaliveIntervalMs": 10000, //Optional keepalive interval (ms)
+            "preserveMtime": false //Set the remote modification time to the local one after upload (requires MFMT support on the server)
         }
     ]
 }
@@ -187,6 +189,7 @@ Instead of a clear-text `password` or `passphrase`, store the value in the OS ke
 | `secure` | boolean \| string | `false` | `true` for explicit FTPS (AUTH TLS), `"implicit"` for implicit FTPS |
 | `secureOptions.rejectUnauthorized` | boolean | `false` | Whether to reject unauthorized SSL certificates |
 | `keepaliveIntervalMs` | number | - | Keepalive interval in milliseconds |
+| `preserveMtime` | boolean | `false` | Set the remote file modification time to the local one after upload (sent with the `MFMT` command; servers without `MFMT` support are skipped with a warning) |
 
 ## SFTP Target Options
 
@@ -205,6 +208,7 @@ Instead of a clear-text `password` or `passphrase`, store the value in the OS ke
 | `useAuthAgent` | bool | `false` | Enable authentication over SSH auth agent |
 | `authAgentPath` | string | `${env.SSH_AUTH_SOCK}` | Path of the SSH agent socket |
 | `keepaliveIntervalMs` | number | - | Keepalive interval in milliseconds |
+| `preserveMtime` | boolean | `false` | Set the remote file modification time to the local one after upload |
 
 ## Extension Commands
 

@@ -1,6 +1,7 @@
 import { Extension } from "../extension";
 import { QueueTask, RemoteDirEntry, TargetInterface, TargetOptionsInterface } from "./Interfaces";
 import * as path from "path";
+import * as fs from "fs";
 import * as vscode from "vscode";
 import ssh2 = require("ssh2");
 import { Queue } from "../Queue";
@@ -239,6 +240,24 @@ export class SFTP extends Target implements TargetInterface {
             keepaliveCountMax: this.options.keepaliveIntervalMs ? 3 : undefined,
         });
     }
+    private async setRemoteMtime(uri: vscode.Uri, remotePath: string): Promise<void> {
+        if (!this.options.preserveMtime || !this.sftp) {
+            return;
+        }
+        const sftp = this.sftp;
+        try {
+            const stat = await fs.promises.stat(uri.fsPath);
+            await new Promise<void>((resolve, reject) => {
+                sftp.utimes(remotePath, Math.floor(stat.atimeMs / 1000), Math.floor(stat.mtimeMs / 1000), (err: any) =>
+                    err ? reject(err) : resolve(),
+                );
+            });
+        } catch (error: any) {
+            Extension.appendLineToOutputChannel(
+                "[WARN][SFTP] Can't preserve modification time of: " + remotePath + ". " + (error?.message ?? error),
+            );
+        }
+    }
     upload(uri: vscode.Uri): Promise<vscode.Uri> {
         const relativePath = Targets.getRelativePath(this.options, uri);
         return new Promise<vscode.Uri>((resolve, reject) => {
@@ -272,8 +291,10 @@ export class SFTP extends Target implements TargetInterface {
                                             reject(err);
                                             return;
                                         }
-                                        cb();
-                                        resolve(uri);
+                                        this.setRemoteMtime(uri, this.options.dir + relativePath).then(() => {
+                                            cb();
+                                            resolve(uri);
+                                        });
                                     });
                                 },
                                 (reason: Error) => {
@@ -299,8 +320,10 @@ export class SFTP extends Target implements TargetInterface {
                             relativePath +
                             "'",
                     );
-                    cb();
-                    resolve(uri);
+                    this.setRemoteMtime(uri, this.options.dir + relativePath).then(() => {
+                        cb();
+                        resolve(uri);
+                    });
                 });
             });
             job.uri = uri;

@@ -2,6 +2,7 @@ import Client = require("ftp");
 import { Extension } from "../extension";
 import { QueueTask, RemoteDirEntry, TargetInterface, TargetOptionsInterface } from "./Interfaces";
 import * as path from "path";
+import * as fs from "fs";
 import * as vscode from "vscode";
 import { Queue } from "../Queue";
 import EventEmitter = require("events");
@@ -17,6 +18,7 @@ export class FTP extends Target implements TargetInterface {
     private queue: Queue<QueueTask> = new Queue<QueueTask>();
     private creatingDirectories: Map<string, Promise<string>> = new Map([]);
     private keepaliveLogTimer: NodeJS.Timeout | null = null;
+    private mfmtUnsupported: boolean = false;
 
     private startKeepaliveLogging(): void {
         this.stopKeepaliveLogging();
@@ -116,6 +118,7 @@ export class FTP extends Target implements TargetInterface {
         this.client.once("ready", () => {
             this.isConnected = true;
             this.isConnecting = false;
+            this.mfmtUnsupported = false;
             this.startKeepaliveLogging();
             this.emit("ready", this);
         });
@@ -162,6 +165,37 @@ export class FTP extends Target implements TargetInterface {
             },
         });
     }
+    private async setRemoteMtime(uri: vscode.Uri, remotePath: string): Promise<void> {
+        if (!this.options.preserveMtime || this.mfmtUnsupported) {
+            return;
+        }
+        try {
+            const stat = await fs.promises.stat(uri.fsPath);
+            const time = stat.mtime
+                .toISOString()
+                .replace(/\.\d+Z$/, "")
+                .replace(/[-:T]/g, "");
+            await new Promise<void>((resolve, reject) => {
+                // MFMT is not exposed by the ftp library, so it is sent as a raw command
+                (this.client as any)._send("MFMT " + time + " " + remotePath, (err: any) =>
+                    err ? reject(err) : resolve()
+                );
+            });
+        } catch (error: any) {
+            // 500/502/504: the server does not implement MFMT, so stop trying on this connection
+            if ([500, 502, 504].includes(error?.code)) {
+                this.mfmtUnsupported = true;
+                Extension.appendLineToOutputChannel(
+                    "[WARN][FTP] Server does not support MFMT, modification times will not be preserved: " +
+                        (error?.message ?? error)
+                );
+                return;
+            }
+            Extension.appendLineToOutputChannel(
+                "[WARN][FTP] Can't preserve modification time of: " + remotePath + ". " + (error?.message ?? error)
+            );
+        }
+    }
     upload(uri: vscode.Uri, attempts = 1): Promise<vscode.Uri> {
         const relativePath = Targets.getRelativePath(this.options, uri);
 
@@ -193,8 +227,6 @@ export class FTP extends Target implements TargetInterface {
                                         reject(err);
                                         return;
                                     }
-                                    cb();
-                                    resolve(uri);
                                     Extension.appendLineToOutputChannel(
                                         "[INFO][FTP] File: '" +
                                             relativePath +
@@ -203,6 +235,10 @@ export class FTP extends Target implements TargetInterface {
                                             relativePath +
                                             "'"
                                     );
+                                    this.setRemoteMtime(uri, this.options.dir + relativePath).then(() => {
+                                        cb();
+                                        resolve(uri);
+                                    });
                                 });
                             },
                             (reason) => {
@@ -221,8 +257,10 @@ export class FTP extends Target implements TargetInterface {
                             relativePath +
                             "'"
                     );
-                    cb();
-                    resolve(uri);
+                    this.setRemoteMtime(uri, this.options.dir + relativePath).then(() => {
+                        cb();
+                        resolve(uri);
+                    });
                 });
             });
             job.uri = uri;
